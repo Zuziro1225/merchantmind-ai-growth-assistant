@@ -1,6 +1,7 @@
 'use client';
 
 import { ChangeEvent, useEffect, useRef, useState } from 'react';
+import './workspaces.css';
 
 const initialMetrics = {
   gmv: '¥48,620',
@@ -146,6 +147,13 @@ export default function Home() {
   const deliveryRating = Number(metrics.deliveryRating);
   const actionPlan = buildActionPlan(conversionRate, repeatPurchaseRate, deliveryRating);
   const diagnosisInsights = [getConversionInsight(conversionRate), peakHourInsight, ...insights];
+  const pageTitle = tab === '总览'
+    ? '我是子月，我正在用 AI 帮商家找到增长机会。'
+    : tab === '经营数据'
+      ? '让每一条经营数据都能支持一个判断。'
+      : tab === 'AI 诊断'
+        ? '把指标变化，转成清晰的下一步行动。'
+        : '找到值得持续投入的商品机会。';
 
   function applyMetricRecord(record: MetricRecord, source: string) {
     setMetrics({
@@ -240,8 +248,8 @@ export default function Home() {
       <div className="sidebar-footer"><span className="avatar">张</span><div><strong>子月的作品集</strong><small>演示模式</small></div></div>
     </aside>
     <section className="content">
-      <header className="topbar"><div><p className="eyebrow">经营总览 · 2026/08/18 — 08/24 · {dataSource}</p><h1>我是子月，我正在用 AI 帮商家找到增长机会。</h1>{uploadMessage && <p className={`upload-message ${uploadMessage.startsWith('上传成功') ? 'success' : 'error'}`}>{uploadMessage}</p>}</div><div><input ref={fileInputRef} className="file-input" type="file" accept=".csv,text/csv" onChange={handleUpload}/><button className="upload" onClick={() => fileInputRef.current?.click()}>＋ 上传经营数据</button><p className="upload-hint">支持 weekly_metrics.csv 格式</p></div></header>
-      <section className="hero-card"><div><p className="eyebrow light">本周经营健康度</p><div className="score-row"><strong>82</strong><span>/ 100</span><b>↑ 6 分</b></div><p>整体稳定，午高峰转化和外卖体验值得优先处理。</p></div><div className="hero-action"><span>✦ AI 本周结论</span><strong>{actionPlan.title}</strong><button onClick={() => setReport(!report)}>{report ? '收起行动方案' : '生成行动方案 →'}</button></div></section>
+      <header className="topbar"><div><p className="eyebrow">{tab} · 2026/08/18 — 08/24 · {dataSource}</p><h1>{pageTitle}</h1>{uploadMessage && <p className={`upload-message ${uploadMessage.startsWith('上传成功') ? 'success' : 'error'}`}>{uploadMessage}</p>}</div><div><input ref={fileInputRef} className="file-input" type="file" accept=".csv,text/csv" onChange={handleUpload}/><button className="upload" onClick={() => fileInputRef.current?.click()}>＋ 上传经营数据</button><p className="upload-hint">支持 weekly_metrics.csv 格式</p></div></header>
+      {tab === '总览' ? <><section className="hero-card"><div><p className="eyebrow light">本周经营健康度</p><div className="score-row"><strong>82</strong><span>/ 100</span><b>↑ 6 分</b></div><p>整体稳定，午高峰转化和外卖体验值得优先处理。</p></div><div className="hero-action"><span>✦ AI 本周结论</span><strong>{actionPlan.title}</strong><button onClick={() => setReport(!report)}>{report ? '收起行动方案' : '生成行动方案 →'}</button></div></section>
       {report && <section className="report"><strong>已根据当前数据生成 3 项优先动作</strong><p className="decision-basis">判断依据：{actionPlan.basis}</p><ol className="report-list">{actionPlan.actions.map((action) => <li key={action}>{action}</li>)}</ol></section>}
       <section className="metrics" aria-label="核心指标"><Metric label="GMV" value={metrics.gmv} change="↑ 12.4%" /><Metric label="支付转化率" value={metrics.conversionRate} change="↓ 1.6%" down/><Metric label="复购率" value={metrics.repeatPurchaseRate} change="↑ 3.1%"/><Metric label="外卖好评率" value={metrics.deliveryRating} change="↓ 0.08" down/></section>
       <section className="grid-section">
@@ -250,7 +258,35 @@ export default function Home() {
       </section>
       <section className="panel ask"><div><p className="eyebrow">问问你的 AI 运营助手</p><h2>“为什么这周 GMV 增长了，转化率却下降？”</h2></div><button onClick={() => setAskOpen(!askOpen)}>{askOpen ? '收起问答' : '开始分析'} <span>→</span></button></section>
       {askOpen && <section className="ask-workspace" aria-label="运营问答"><div className="ask-intro"><div><p className="eyebrow">数据问答</p><h2>基于当前上传的经营数据提问</h2></div><span>{useModel ? '大模型优先' : '规则版回答'}</span></div><label className="model-switch"><input type="checkbox" checked={useModel} onChange={(event) => setUseModel(event.target.checked)}/><span>优先使用 OpenAI 大模型生成回答</span><small>未开通额度时自动使用规则版</small></label><div className="question-chips"><button onClick={() => submitQuestion('为什么这周 GMV 增长了，转化率却下降？')}>GMV 与转化</button><button onClick={() => submitQuestion('如何提高复购？')}>如何提高复购？</button><button onClick={() => submitQuestion('外卖评分需要处理吗？')}>外卖评分需要处理吗？</button></div><div className="question-form"><input value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') submitQuestion(); }} aria-label="输入经营问题" placeholder="例如：应该先做引流还是复购？"/><button disabled={isAnalyzing} onClick={() => submitQuestion()}>{isAnalyzing ? '分析中…' : '分析'}</button></div>{answer && <div className="answer-card"><span>✦ {answerSource || '分析结果'}</span><p>{answer}</p></div>}</section>}
+      </> : tab === '经营数据' ? <DataWorkspace metrics={metrics} dataSource={dataSource} /> : tab === 'AI 诊断' ? <DiagnosisWorkspace insights={diagnosisInsights} actionPlan={actionPlan} /> : <ProductWorkspace />}
     </section>
   </main>;
 }
 function Metric({ label, value, change, down = false }: { label: string; value: string; change: string; down?: boolean }) { return <article className="metric"><p>{label}</p><strong>{value}</strong><span className={down ? 'down' : ''}>{change}</span></article>; }
+
+function DataWorkspace({ metrics, dataSource }: { metrics: typeof initialMetrics; dataSource: string }) {
+  const fields = [
+    { label: 'GMV', value: metrics.gmv, description: '本周成交金额，用于观察收入规模。' },
+    { label: '支付转化率', value: metrics.conversionRate, description: '从访问到支付的效率，用于发现下单阻力。' },
+    { label: '复购率', value: metrics.repeatPurchaseRate, description: '顾客再次购买比例，用于衡量留存质量。' },
+    { label: '外卖好评率', value: metrics.deliveryRating, description: '配送体验反馈，用于守住口碑。' },
+  ];
+  return <section className="workspace-page">
+    <section className="workspace-hero"><div><p className="eyebrow">数据接入</p><h2>当前数据快照已准备好</h2><p>先确保数据正确，再让 AI 基于同一份事实给出建议。</p></div><span className="status-pill">● 数据已就绪</span></section>
+    <section className="data-summary-grid"><article className="panel source-panel"><p className="eyebrow">数据来源</p><h2>{dataSource}</h2><p>支持上传 weekly_metrics.csv。上传后，看板、诊断和问答会同步刷新。</p><div className="source-status"><span>核心字段</span><strong>4 / 4 已完整</strong></div></article><article className="panel quality-panel"><p className="eyebrow">数据质量检查</p><h2>可以开始分析</h2><ul><li><span>✓</span> 四个核心指标均为数值</li><li><span>✓</span> 已用于经营看板和规则诊断</li><li><span>!</span> 当前为周汇总，趋势判断需补充按天数据</li></ul></article></section>
+    <section className="panel field-panel"><div className="panel-head"><div><p className="eyebrow">字段字典</p><h2>每个数字具体代表什么？</h2></div><span className="period">经营周报</span></div><div className="field-table"><div className="field-row field-head"><span>字段</span><span>当前值</span><span>业务意义</span></div>{fields.map((field) => <div className="field-row" key={field.label}><strong>{field.label}</strong><b>{field.value}</b><p>{field.description}</p></div>)}</div></section>
+  </section>;
+}
+
+function DiagnosisWorkspace({ insights, actionPlan }: { insights: Array<{ level: string; title: string; detail: string; tone: string }>; actionPlan: { title: string; basis: string; actions: string[] } }) {
+  return <section className="workspace-page"><section className="workspace-hero"><div><p className="eyebrow">诊断中心</p><h2>先做最值得做的一件事</h2><p>诊断不只告诉商家“哪里有问题”，还会给出判断依据和可验证的行动。</p></div><span className="status-pill">✦ 已生成优先级</span></section><section className="priority-card"><span className="priority-index">P1</span><div><p className="eyebrow light">本周最高优先级</p><h2>{actionPlan.title}</h2><p>{actionPlan.basis}</p></div><div className="priority-action"><span>建议先做</span><strong>{actionPlan.actions[0]}</strong></div></section><section className="diagnosis-board">{insights.map((insight, index) => <article className={`diagnosis-detail ${insight.tone}`} key={insight.title}><div className="diagnosis-number">0{index + 1}</div><div><span>{insight.level}</span><h3>{insight.title}</h3><p>{insight.detail}</p></div><div className="diagnosis-next"><small>下一步</small><strong>{actionPlan.actions[index] || '持续观察相关指标，并在下周复盘。'}</strong></div></article>)}</section></section>;
+}
+
+function ProductWorkspace() {
+  const products = [
+    { name: '燕麦拿铁', metric: '复购率 31%', level: '增长机会', detail: '高出门店平均水平，适合成为复购活动的主推商品。', action: '搭配可颂测试“第二杯 / 加购”组合。', tone: 'good' },
+    { name: '午高峰套餐', metric: '等待 4.2 分钟', level: '状态良好', detail: '当前出餐体验稳定，可以保留并观察销量结构。', action: '保留高峰期出餐快、毛利稳定的组合。', tone: 'good' },
+    { name: '外卖订单', metric: '好评率 4.76', level: '需要验证', detail: '总体健康，但仍应跟踪低分评价是否集中在某个时段。', action: '每周归类等待、漏品和包装相关反馈。', tone: 'neutral' },
+  ];
+  return <section className="workspace-page"><section className="workspace-hero"><div><p className="eyebrow">商品机会</p><h2>把经营动作落到具体商品上</h2><p>这是基于当前演示数据生成的商品机会卡；后续会接入商品明细和真实排序。</p></div><span className="status-pill">3 个机会待跟进</span></section><section className="product-grid">{products.map((product) => <article className="product-card" key={product.name}><div className="product-top"><span className={`tag ${product.tone}`}>{product.level}</span><b>{product.metric}</b></div><h3>{product.name}</h3><p>{product.detail}</p><div className="product-action"><small>建议动作</small><strong>{product.action}</strong></div></article>)}</section><section className="panel product-note"><p className="eyebrow">下一阶段</p><h2>接入商品明细后，会增加什么？</h2><p>销量、毛利、复购、评分和缺货率会共同决定商品优先级。这样可以让“商品分析”从演示卡片升级为真正的运营决策台。</p></section></section>;
+}
