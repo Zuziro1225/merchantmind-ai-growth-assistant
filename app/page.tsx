@@ -3,6 +3,7 @@
 import { ChangeEvent, useEffect, useRef, useState } from 'react';
 import './workspaces.css';
 import './upload.css';
+import './product-analysis.css';
 
 const initialMetrics = {
   gmv: '¥48,620',
@@ -19,6 +20,16 @@ const insights = [
 const requiredMetricFields = ['gmv', 'payment_conversion_rate', 'repeat_purchase_rate', 'delivery_rating'];
 
 type MetricRecord = Record<string, string>;
+type ProductRecord = {
+  productName: string;
+  category: string;
+  unitsSold: number;
+  revenue: number;
+  grossMargin: number;
+  repeatPurchaseRate: number;
+  rating: number;
+  outOfStockCount: number;
+};
 
 function readWeeklyMetrics(csv: string): MetricRecord {
   const lines = csv.trim().split(/\r?\n/).filter(Boolean);
@@ -140,6 +151,7 @@ export default function Home() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [metrics, setMetrics] = useState(initialMetrics);
   const [dataSource, setDataSource] = useState('正在读取 CSV 数据…');
+  const [products, setProducts] = useState<ProductRecord[]>([]);
   const [uploadMessage, setUploadMessage] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [peakHourInsight, setPeakHourInsight] = useState({ level: '分析中', title: '正在读取午高峰数据', detail: '稍后将根据等待时间与转化率完成诊断。', tone: 'neutral' });
@@ -231,6 +243,27 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    fetch('/data/product_metrics.csv')
+      .then((response) => response.text())
+      .then((csv) => {
+        const [headerLine, ...valueLines] = csv.trim().split(/\r?\n/);
+        const headers = headerLine.split(',');
+        const rows = valueLines.map((line) => Object.fromEntries(headers.map((header, index) => [header, line.split(',')[index]?.trim() ?? ''])));
+        setProducts(rows.map((row) => ({
+          productName: row.product_name,
+          category: row.category,
+          unitsSold: Number(row.units_sold),
+          revenue: Number(row.revenue),
+          grossMargin: Number(row.gross_margin),
+          repeatPurchaseRate: Number(row.repeat_purchase_rate),
+          rating: Number(row.rating),
+          outOfStockCount: Number(row.out_of_stock_count),
+        }))); 
+      })
+      .catch(() => setProducts([]));
+  }, []);
+
+  useEffect(() => {
     fetch('/data/hourly_funnel.csv')
       .then((response) => response.text())
       .then((csv) => {
@@ -259,7 +292,7 @@ export default function Home() {
       </section>
       <section className="panel ask"><div><p className="eyebrow">问问你的 AI 运营助手</p><h2>“为什么这周 GMV 增长了，转化率却下降？”</h2></div><button onClick={() => setAskOpen(!askOpen)}>{askOpen ? '收起问答' : '开始分析'} <span>→</span></button></section>
       {askOpen && <section className="ask-workspace" aria-label="运营问答"><div className="ask-intro"><div><p className="eyebrow">数据问答</p><h2>基于当前上传的经营数据提问</h2></div><span>{useModel ? '大模型优先' : '规则版回答'}</span></div><label className="model-switch"><input type="checkbox" checked={useModel} onChange={(event) => setUseModel(event.target.checked)}/><span>优先使用 OpenAI 大模型生成回答</span><small>未开通额度时自动使用规则版</small></label><div className="question-chips"><button onClick={() => submitQuestion('为什么这周 GMV 增长了，转化率却下降？')}>GMV 与转化</button><button onClick={() => submitQuestion('如何提高复购？')}>如何提高复购？</button><button onClick={() => submitQuestion('外卖评分需要处理吗？')}>外卖评分需要处理吗？</button></div><div className="question-form"><input value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') submitQuestion(); }} aria-label="输入经营问题" placeholder="例如：应该先做引流还是复购？"/><button disabled={isAnalyzing} onClick={() => submitQuestion()}>{isAnalyzing ? '分析中…' : '分析'}</button></div>{answer && <div className="answer-card"><span>✦ {answerSource || '分析结果'}</span><p>{answer}</p></div>}</section>}
-      </> : tab === '经营数据' ? <DataWorkspace metrics={metrics} dataSource={dataSource} /> : tab === 'AI 诊断' ? <DiagnosisWorkspace insights={diagnosisInsights} actionPlan={actionPlan} /> : <ProductWorkspace />}
+      </> : tab === '经营数据' ? <DataWorkspace metrics={metrics} dataSource={dataSource} /> : tab === 'AI 诊断' ? <DiagnosisWorkspace insights={diagnosisInsights} actionPlan={actionPlan} /> : <ProductWorkspace products={products} />}
     </section>
   </main>;
 }
@@ -283,11 +316,12 @@ function DiagnosisWorkspace({ insights, actionPlan }: { insights: Array<{ level:
   return <section className="workspace-page"><section className="workspace-hero"><div><p className="eyebrow">诊断中心</p><h2>先做最值得做的一件事</h2><p>诊断不只告诉商家“哪里有问题”，还会给出判断依据和可验证的行动。</p></div><span className="status-pill">✦ 已生成优先级</span></section><section className="priority-card"><span className="priority-index">P1</span><div><p className="eyebrow light">本周最高优先级</p><h2>{actionPlan.title}</h2><p>{actionPlan.basis}</p></div><div className="priority-action"><span>建议先做</span><strong>{actionPlan.actions[0]}</strong></div></section><section className="diagnosis-board">{insights.map((insight, index) => <article className={`diagnosis-detail ${insight.tone}`} key={insight.title}><div className="diagnosis-number">0{index + 1}</div><div><span>{insight.level}</span><h3>{insight.title}</h3><p>{insight.detail}</p></div><div className="diagnosis-next"><small>下一步</small><strong>{actionPlan.actions[index] || '持续观察相关指标，并在下周复盘。'}</strong></div></article>)}</section></section>;
 }
 
-function ProductWorkspace() {
-  const products = [
-    { name: '燕麦拿铁', metric: '复购率 31%', level: '增长机会', detail: '高出门店平均水平，适合成为复购活动的主推商品。', action: '搭配可颂测试“第二杯 / 加购”组合。', tone: 'good' },
-    { name: '午高峰套餐', metric: '等待 4.2 分钟', level: '状态良好', detail: '当前出餐体验稳定，可以保留并观察销量结构。', action: '保留高峰期出餐快、毛利稳定的组合。', tone: 'good' },
-    { name: '外卖订单', metric: '好评率 4.76', level: '需要验证', detail: '总体健康，但仍应跟踪低分评价是否集中在某个时段。', action: '每周归类等待、漏品和包装相关反馈。', tone: 'neutral' },
-  ];
-  return <section className="workspace-page"><section className="workspace-hero"><div><p className="eyebrow">商品机会</p><h2>把经营动作落到具体商品上</h2><p>这是基于当前演示数据生成的商品机会卡；后续会接入商品明细和真实排序。</p></div><span className="status-pill">3 个机会待跟进</span></section><section className="product-grid">{products.map((product) => <article className="product-card" key={product.name}><div className="product-top"><span className={`tag ${product.tone}`}>{product.level}</span><b>{product.metric}</b></div><h3>{product.name}</h3><p>{product.detail}</p><div className="product-action"><small>建议动作</small><strong>{product.action}</strong></div></article>)}</section><section className="panel product-note"><p className="eyebrow">下一阶段</p><h2>接入商品明细后，会增加什么？</h2><p>销量、毛利、复购、评分和缺货率会共同决定商品优先级。这样可以让“商品分析”从演示卡片升级为真正的运营决策台。</p></section></section>;
+function ProductWorkspace({ products }: { products: ProductRecord[] }) {
+  const productCards = products.map((product) => {
+    if (product.rating < 4.7 || product.outOfStockCount > 0) return { product, level: '需要处理', detail: `评分 ${product.rating.toFixed(2)}，缺货 ${product.outOfStockCount} 次，体验可能影响后续购买。`, action: '检查低分反馈与缺货原因，优先修复体验问题。', tone: 'alert' };
+    if (product.repeatPurchaseRate >= 0.3) return { product, level: '增长机会', detail: `复购率 ${(product.repeatPurchaseRate * 100).toFixed(0)}%，高于本项目设定的 30% 增长线。`, action: '搭配高毛利商品测试“第二杯 / 加购”组合。', tone: 'good' };
+    return { product, level: '持续观察', detail: `销量 ${product.unitsSold} 件，毛利率 ${(product.grossMargin * 100).toFixed(0)}%，暂未发现紧急风险。`, action: '保留商品并持续观察销量、评分与复购变化。', tone: 'neutral' };
+  }).sort((a, b) => (a.tone === 'alert' ? -1 : b.tone === 'alert' ? 1 : b.product.revenue - a.product.revenue));
+  const totalRevenue = products.reduce((sum, product) => sum + product.revenue, 0);
+  return <section className="workspace-page"><section className="workspace-hero"><div><p className="eyebrow">商品机会 · 已读取 product_metrics.csv</p><h2>用商品明细找到增长与风险</h2><p>当前判断同时参考销量、收入、毛利、复购、评分和缺货次数。</p></div><span className="status-pill">{products.length || '…'} 个商品已分析</span></section><section className="product-summary"><article><span>商品收入合计</span><strong>¥{totalRevenue.toLocaleString('zh-CN')}</strong></article><article><span>需要优先处理</span><strong>{productCards.filter((item) => item.tone === 'alert').length} 个</strong></article><article><span>复购增长机会</span><strong>{productCards.filter((item) => item.level === '增长机会').length} 个</strong></article></section><section className="product-grid">{productCards.map(({ product, level, detail, action, tone }) => <article className="product-card" key={product.productName}><div className="product-top"><span className={`tag ${tone}`}>{level}</span><b>收入 ¥{product.revenue.toLocaleString('zh-CN')}</b></div><h3>{product.productName}</h3><p>{detail}</p><div className="product-meta"><span>{product.category}</span><span>销量 {product.unitsSold}</span><span>毛利 {(product.grossMargin * 100).toFixed(0)}%</span></div><div className="product-action"><small>建议动作</small><strong>{action}</strong></div></article>)}</section><section className="panel product-note"><p className="eyebrow">继续使用自己的数据</p><h2>商品明细模板已经准备好</h2><p>字段包括商品名称、品类、销量、收入、毛利率、复购率、评分和缺货次数。下一步我们会把“上传商品 CSV”也接到这里。</p><a className="template-download" href="/data/product_metrics_template.csv" download>↓ 下载商品明细 CSV 模板</a></section></section>;
 }
