@@ -68,15 +68,83 @@ function getPeakHourInsight(waitMinutes: number, conversionRate: number) {
   };
 }
 
+function buildActionPlan(conversionRate: number, repeatPurchaseRate: number, deliveryRating: number) {
+  if (conversionRate < 0.08) {
+    return {
+      title: '先改善支付转化，再放大流量',
+      basis: `支付转化率 ${(conversionRate * 100).toFixed(1)}%，低于 8.0% 健康线。`,
+      actions: [
+        '午高峰推出 1 组“主推饮品 + 轻食”套餐，减少顾客决策成本。',
+        '检查销量前 5 商品的价格、图片和库存状态，优先修复下单阻力。',
+        '连续观察 7 天转化率，达到 8.0% 后再考虑加大引流活动。',
+      ],
+    };
+  }
+  if (repeatPurchaseRate < 0.25) {
+    return {
+      title: '把新客转成第二次购买',
+      basis: `支付转化健康，但复购率 ${(repeatPurchaseRate * 100).toFixed(1)}% 仍有提升空间。`,
+      actions: [
+        '给本周首次购买的顾客发放 7 天内可用的复购券。',
+        '围绕高复购饮品设计加购组合，提高下一单的选择效率。',
+        '按新客和老客分别追踪复购率，验证优惠是否真的有效。',
+      ],
+    };
+  }
+  if (deliveryRating < 4.7) {
+    return {
+      title: '优先修复外卖体验，守住口碑',
+      basis: `外卖好评率 ${deliveryRating.toFixed(2)}，需要尽快排查低分原因。`,
+      actions: [
+        '筛选近 7 天低分订单，按等待、漏品和包装问题分类。',
+        '午高峰提前备料，并为易洒商品增加封口检查。',
+        '对符合条件的低分订单做一次定向回访，记录修复结果。',
+      ],
+    };
+  }
+  return {
+    title: '经营指标稳定，尝试放大高价值商品',
+    basis: '支付转化、复购与外卖体验目前都处于健康范围。',
+    actions: [
+      '选择 1 个高复购商品做套餐测试，观察客单价变化。',
+      '复盘午高峰的商品结构，保留出餐快、毛利稳定的组合。',
+      '下周继续跟踪 4 个核心指标，防止增长带来体验波动。',
+    ],
+  };
+}
+
+function answerBusinessQuestion(question: string, metrics: typeof initialMetrics, actionPlan: ReturnType<typeof buildActionPlan>) {
+  const normalized = question.toLowerCase();
+  if (normalized.includes('gmv') || normalized.includes('增长') || normalized.includes('转化')) {
+    return `当前 GMV 为 ${metrics.gmv}，支付转化率为 ${metrics.conversionRate}。这份 CSV 只有一周汇总数据，因此不能严谨地证明 GMV 变化的单一原因；下一步应补充按天的访客数、下单数和支付金额，再判断是流量结构还是下单环节导致变化。当前优先动作仍是：${actionPlan.actions[0]}`;
+  }
+  if (normalized.includes('复购') || normalized.includes('新客')) {
+    return `当前复购率为 ${metrics.repeatPurchaseRate}，低于本项目设定的 25% 关注线。建议先区分新客和老客，再对首次购买的顾客测试 7 天复购券，并用下周复购率验证效果。`;
+  }
+  if (normalized.includes('外卖') || normalized.includes('评分') || normalized.includes('好评')) {
+    return `当前外卖好评率为 ${metrics.deliveryRating}，高于 4.70 的基础健康线，暂不是最高优先级。但仍建议持续记录低分订单的等待、漏品和包装原因，避免增长时体验下滑。`;
+  }
+  return `根据当前上传的数据：GMV ${metrics.gmv}、支付转化率 ${metrics.conversionRate}、复购率 ${metrics.repeatPurchaseRate}、外卖好评率 ${metrics.deliveryRating}。当前最优先的经营主题是“${actionPlan.title}”，判断依据是：${actionPlan.basis}`;
+}
+
 export default function Home() {
   const [tab, setTab] = useState('总览');
   const [report, setReport] = useState(false);
+  const [askOpen, setAskOpen] = useState(false);
+  const [question, setQuestion] = useState('为什么这周 GMV 增长了，转化率却下降？');
+  const [answer, setAnswer] = useState('');
+  const [useModel, setUseModel] = useState(false);
+  const [answerSource, setAnswerSource] = useState('');
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [metrics, setMetrics] = useState(initialMetrics);
   const [dataSource, setDataSource] = useState('正在读取 CSV 数据…');
   const [uploadMessage, setUploadMessage] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [peakHourInsight, setPeakHourInsight] = useState({ level: '分析中', title: '正在读取午高峰数据', detail: '稍后将根据等待时间与转化率完成诊断。', tone: 'neutral' });
   const conversionRate = Number(metrics.conversionRate.replace('%', '')) / 100;
+  const repeatPurchaseRate = Number(metrics.repeatPurchaseRate.replace('%', '')) / 100;
+  const deliveryRating = Number(metrics.deliveryRating);
+  const actionPlan = buildActionPlan(conversionRate, repeatPurchaseRate, deliveryRating);
   const diagnosisInsights = [getConversionInsight(conversionRate), peakHourInsight, ...insights];
 
   function applyMetricRecord(record: MetricRecord, source: string) {
@@ -111,6 +179,39 @@ export default function Home() {
     event.target.value = '';
   }
 
+  async function submitQuestion(nextQuestion = question) {
+    const cleanedQuestion = nextQuestion.trim();
+    if (!cleanedQuestion) return;
+    setQuestion(cleanedQuestion);
+    setIsAnalyzing(true);
+    if (!useModel) {
+      setAnswer(answerBusinessQuestion(cleanedQuestion, metrics, actionPlan));
+      setAnswerSource('规则版 · 基于已知指标');
+      setIsAnalyzing(false);
+      return;
+    }
+    try {
+      const response = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: cleanedQuestion, metrics }),
+      });
+      const result = await response.json() as { answer?: string; error?: string };
+      if (!response.ok || !result.answer) throw new Error(result.error || '大模型暂时不可用');
+      setAnswer(result.answer);
+      setAnswerSource('OpenAI 大模型 · 仅使用当前上传数据');
+    } catch (error) {
+      const message = error instanceof Error ? error.message.toLowerCase() : '';
+      const unavailableReason = message.includes('quota') || message.includes('billing')
+        ? '当前尚未开通 API 可用额度，已自动切换为规则版分析。'
+        : '大模型服务暂不可用，已自动切换为规则版分析。';
+      setAnswer(`${unavailableReason}\n\n以下为规则版分析：${answerBusinessQuestion(cleanedQuestion, metrics, actionPlan)}`);
+      setAnswerSource('规则版兜底 · 保持服务可用');
+    } finally {
+      setIsAnalyzing(false);
+    }
+  }
+
   useEffect(() => {
     fetch('/data/weekly_metrics.csv')
       .then((response) => response.text())
@@ -140,14 +241,15 @@ export default function Home() {
     </aside>
     <section className="content">
       <header className="topbar"><div><p className="eyebrow">经营总览 · 2026/08/18 — 08/24 · {dataSource}</p><h1>我是子月，我正在用 AI 帮商家找到增长机会。</h1>{uploadMessage && <p className={`upload-message ${uploadMessage.startsWith('上传成功') ? 'success' : 'error'}`}>{uploadMessage}</p>}</div><div><input ref={fileInputRef} className="file-input" type="file" accept=".csv,text/csv" onChange={handleUpload}/><button className="upload" onClick={() => fileInputRef.current?.click()}>＋ 上传经营数据</button><p className="upload-hint">支持 weekly_metrics.csv 格式</p></div></header>
-      <section className="hero-card"><div><p className="eyebrow light">本周经营健康度</p><div className="score-row"><strong>82</strong><span>/ 100</span><b>↑ 6 分</b></div><p>整体稳定，午高峰转化和外卖体验值得优先处理。</p></div><div className="hero-action"><span>✦ AI 本周结论</span><strong>先优化午高峰的<br/>商品组合与出餐效率</strong><button onClick={() => setReport(!report)}>{report ? '已生成行动方案' : '生成行动方案 →'}</button></div></section>
-      {report && <section className="report"><strong>已为你生成 3 项优先动作：</strong> ① 午高峰推出「拿铁 + 可颂」套餐；② 预制高频原料，缩短出餐；③ 回访本周低分外卖订单。</section>}
+      <section className="hero-card"><div><p className="eyebrow light">本周经营健康度</p><div className="score-row"><strong>82</strong><span>/ 100</span><b>↑ 6 分</b></div><p>整体稳定，午高峰转化和外卖体验值得优先处理。</p></div><div className="hero-action"><span>✦ AI 本周结论</span><strong>{actionPlan.title}</strong><button onClick={() => setReport(!report)}>{report ? '收起行动方案' : '生成行动方案 →'}</button></div></section>
+      {report && <section className="report"><strong>已根据当前数据生成 3 项优先动作</strong><p className="decision-basis">判断依据：{actionPlan.basis}</p><ol className="report-list">{actionPlan.actions.map((action) => <li key={action}>{action}</li>)}</ol></section>}
       <section className="metrics" aria-label="核心指标"><Metric label="GMV" value={metrics.gmv} change="↑ 12.4%" /><Metric label="支付转化率" value={metrics.conversionRate} change="↓ 1.6%" down/><Metric label="复购率" value={metrics.repeatPurchaseRate} change="↑ 3.1%"/><Metric label="外卖好评率" value={metrics.deliveryRating} change="↓ 0.08" down/></section>
       <section className="grid-section">
         <article className="panel trend"><div className="panel-head"><div><p className="eyebrow">GMV 趋势</p><h2>收入在增长，但转化在变慢</h2></div><span className="period">近 7 天⌄</span></div><div className="chart"><div className="axis"><span>¥9k</span><span>¥6k</span><span>¥3k</span></div><div className="chart-area"><div className="line line-main"/><div className="line line-dash"/><div className="days"><span>周一</span><span>周二</span><span>周三</span><span>周四</span><span>周五</span><span>周六</span><span>周日</span></div></div></div><div className="legend"><span><i className="dot purple"/>GMV</span><span><i className="dot mint"/>访客数</span></div></article>
         <article className="panel diagnosis"><div className="panel-head"><div><p className="eyebrow">AI 经营诊断</p><h2>今天最值得处理的事</h2></div><span className="spark">✦</span></div>{diagnosisInsights.map((x) => <div className={`insight ${x.tone}`} key={x.title}><span>{x.level}</span><div><strong>{x.title}</strong><p>{x.detail}</p></div><button aria-label={`查看${x.title}`}>›</button></div>)}</article>
       </section>
-      <section className="panel ask"><div><p className="eyebrow">问问你的 AI 运营助手</p><h2>“为什么这周 GMV 增长了，转化率却下降？”</h2></div><button>开始分析 <span>→</span></button></section>
+      <section className="panel ask"><div><p className="eyebrow">问问你的 AI 运营助手</p><h2>“为什么这周 GMV 增长了，转化率却下降？”</h2></div><button onClick={() => setAskOpen(!askOpen)}>{askOpen ? '收起问答' : '开始分析'} <span>→</span></button></section>
+      {askOpen && <section className="ask-workspace" aria-label="运营问答"><div className="ask-intro"><div><p className="eyebrow">数据问答</p><h2>基于当前上传的经营数据提问</h2></div><span>{useModel ? '大模型优先' : '规则版回答'}</span></div><label className="model-switch"><input type="checkbox" checked={useModel} onChange={(event) => setUseModel(event.target.checked)}/><span>优先使用 OpenAI 大模型生成回答</span><small>未开通额度时自动使用规则版</small></label><div className="question-chips"><button onClick={() => submitQuestion('为什么这周 GMV 增长了，转化率却下降？')}>GMV 与转化</button><button onClick={() => submitQuestion('如何提高复购？')}>如何提高复购？</button><button onClick={() => submitQuestion('外卖评分需要处理吗？')}>外卖评分需要处理吗？</button></div><div className="question-form"><input value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') submitQuestion(); }} aria-label="输入经营问题" placeholder="例如：应该先做引流还是复购？"/><button disabled={isAnalyzing} onClick={() => submitQuestion()}>{isAnalyzing ? '分析中…' : '分析'}</button></div>{answer && <div className="answer-card"><span>✦ {answerSource || '分析结果'}</span><p>{answer}</p></div>}</section>}
     </section>
   </main>;
 }
