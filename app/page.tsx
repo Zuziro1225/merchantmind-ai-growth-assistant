@@ -10,6 +10,7 @@ import './data-evidence.css';
 import './sample-data.css';
 import './action-tracker.css';
 import './review-samples.css';
+import './review-checkpoint.css';
 
 const initialMetrics = {
   gmv: '¥48,620',
@@ -39,6 +40,7 @@ type ProductRecord = {
 };
 type DailyRecord = { date: string; visitors: number; orders: number; paidOrders: number; gmv: number; avgWaitMinutes: number; deliveryRating: number };
 type ReviewRecord = { date: string; channel: string; productName: string; rating: number; issueTag: string; comment: string };
+type ReviewNote = { outcome: string; note: string; savedAt: string };
 
 function readWeeklyMetrics(csv: string): MetricRecord {
   const lines = csv.trim().split(/\r?\n/).filter(Boolean);
@@ -227,6 +229,8 @@ export default function Home() {
   const [report, setReport] = useState(false);
   const [completedActions, setCompletedActions] = useState<string[]>([]);
   const [actionProgressReady, setActionProgressReady] = useState(false);
+  const [reviewNote, setReviewNote] = useState<ReviewNote>({ outcome: '观察中', note: '', savedAt: '' });
+  const [reviewNoteReady, setReviewNoteReady] = useState(false);
   const [askOpen, setAskOpen] = useState(false);
   const [question, setQuestion] = useState('为什么这周 GMV 增长了，转化率却下降？');
   const [answer, setAnswer] = useState('');
@@ -276,6 +280,14 @@ export default function Home() {
     setCompletedActions([]);
   }
 
+  function saveReviewNote(outcome: string, note: string) {
+    setReviewNote({ outcome, note: note.trim(), savedAt: new Date().toLocaleDateString('zh-CN') });
+  }
+
+  function clearReviewNote() {
+    setReviewNote({ outcome: '观察中', note: '', savedAt: '' });
+  }
+
   function handleUpload(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -290,6 +302,7 @@ export default function Home() {
         const record = readWeeklyMetrics(String(reader.result));
         applyMetricRecord(record, `已上传 ${file.name}`);
         setCompletedActions([]);
+        clearReviewNote();
         setUploadMessage('上传成功：看板和诊断已按新数据刷新');
       } catch (error) {
         setUploadMessage(error instanceof Error ? `上传失败：${error.message}` : '上传失败，请检查文件格式');
@@ -378,6 +391,21 @@ export default function Home() {
   }, [actionProgressReady, completedActions]);
 
   useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem('merchantmind-review-note');
+      if (saved) setReviewNote(JSON.parse(saved) as ReviewNote);
+    } catch {
+      window.localStorage.removeItem('merchantmind-review-note');
+    } finally {
+      setReviewNoteReady(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (reviewNoteReady) window.localStorage.setItem('merchantmind-review-note', JSON.stringify(reviewNote));
+  }, [reviewNoteReady, reviewNote]);
+
+  useEffect(() => {
     fetch('/data/reviews.csv')
       .then((response) => response.text())
       .then((csv) => { setReviews(readReviews(csv)); setReviewSource('已读取 reviews.csv'); })
@@ -430,7 +458,7 @@ export default function Home() {
       </section>
       <section className="panel ask"><div><p className="eyebrow">问问你的 AI 运营助手</p><h2>“为什么这周 GMV 增长了，转化率却下降？”</h2></div><button onClick={() => setAskOpen(!askOpen)}>{askOpen ? '收起问答' : '开始分析'} <span>→</span></button></section>
       {askOpen && <section className="ask-workspace" aria-label="运营问答"><div className="ask-intro"><div><p className="eyebrow">数据问答</p><h2>基于当前上传的经营数据提问</h2></div><span>{useModel ? '大模型优先' : '规则版回答'}</span></div><label className="model-switch"><input type="checkbox" checked={useModel} onChange={(event) => setUseModel(event.target.checked)}/><span>优先使用 OpenAI 大模型生成回答</span><small>未开通额度时自动使用规则版</small></label><div className="question-chips"><button onClick={() => submitQuestion('为什么这周 GMV 增长了，转化率却下降？')}>GMV 与转化</button><button onClick={() => submitQuestion('如何提高复购？')}>如何提高复购？</button><button onClick={() => submitQuestion('外卖评分需要处理吗？')}>外卖评分需要处理吗？</button></div><div className="question-form"><input value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') submitQuestion(); }} aria-label="输入经营问题" placeholder="例如：应该先做引流还是复购？"/><button disabled={isAnalyzing} onClick={() => submitQuestion()}>{isAnalyzing ? '分析中…' : '分析'}</button></div>{answer && <div className="answer-card"><span>✦ {answerSource || '分析结果'}</span><p>{answer}</p></div>}</section>}
-      </> : tab === '经营数据' ? <DataWorkspace metrics={metrics} dataSource={dataSource} dailyMetrics={dailyMetrics} dailySource={dailySource} products={products} reviews={reviews} reviewSource={reviewSource} /> : tab === 'AI 诊断' ? <DiagnosisWorkspace insights={diagnosisInsights} actionPlan={actionPlan} reviews={reviews} completedActions={completedActions} onToggleAction={toggleAction} onClearActions={clearActions} /> : <ProductWorkspace products={products} productSource={productSource} productUploadMessage={productUploadMessage} onUpload={handleProductUpload} />}
+      </> : tab === '经营数据' ? <DataWorkspace metrics={metrics} dataSource={dataSource} dailyMetrics={dailyMetrics} dailySource={dailySource} products={products} reviews={reviews} reviewSource={reviewSource} /> : tab === 'AI 诊断' ? <DiagnosisWorkspace insights={diagnosisInsights} actionPlan={actionPlan} reviews={reviews} metrics={metrics} completedActions={completedActions} reviewNote={reviewNote} onToggleAction={toggleAction} onClearActions={clearActions} onSaveReviewNote={saveReviewNote} onClearReviewNote={clearReviewNote} /> : <ProductWorkspace products={products} productSource={productSource} productUploadMessage={productUploadMessage} onUpload={handleProductUpload} />}
     </section>
   </main>;
 }
@@ -460,13 +488,21 @@ function DailyTrend({ dailyMetrics }: { dailyMetrics: DailyRecord[] }) {
   return <article className="panel trend"><div className="panel-head"><div><p className="eyebrow">GMV 趋势 · 按天数据</p><h2>{peak ? `${peak.date.slice(5).replace('-', '/')} 达到本周收入峰值` : '正在读取按天经营数据'}</h2></div><span className="period">最近 7 天 / 共 {dailyMetrics.length} 天</span></div>{recentDays.length > 0 ? <><div className="daily-bars">{recentDays.map((item) => <div className="daily-bar-item" key={item.date}><span>¥{(item.gmv / 1000).toFixed(1)}k</span><i style={{ height: `${Math.max(14, item.gmv / maxGmv * 100)}%` }} /><b>{item.date.slice(5).replace('-', '/')}</b></div>)}</div><div className="legend"><span><i className="dot purple"/>GMV（每日成交金额）</span><span>近 7 天 ¥{recentDays.reduce((sum, item) => sum + item.gmv, 0).toLocaleString('zh-CN')}</span></div></> : <p className="empty-data">暂无按天数据。</p>}</article>;
 }
 
-function DiagnosisWorkspace({ insights, actionPlan, reviews, completedActions, onToggleAction, onClearActions }: { insights: Array<{ level: string; title: string; detail: string; tone: string }>; actionPlan: { title: string; basis: string; actions: string[] }; reviews: ReviewRecord[]; completedActions: string[]; onToggleAction: (action: string) => void; onClearActions: () => void }) {
+function DiagnosisWorkspace({ insights, actionPlan, reviews, metrics, completedActions, reviewNote, onToggleAction, onClearActions, onSaveReviewNote, onClearReviewNote }: { insights: Array<{ level: string; title: string; detail: string; tone: string }>; actionPlan: { title: string; basis: string; actions: string[] }; reviews: ReviewRecord[]; metrics: typeof initialMetrics; completedActions: string[]; reviewNote: ReviewNote; onToggleAction: (action: string) => void; onClearActions: () => void; onSaveReviewNote: (outcome: string, note: string) => void; onClearReviewNote: () => void }) {
   const [showReviewSamples, setShowReviewSamples] = useState(false);
+  const [draftOutcome, setDraftOutcome] = useState(reviewNote.outcome);
+  const [draftNote, setDraftNote] = useState(reviewNote.note);
   const lowScoreReviews = reviews.filter((review) => review.rating <= 3);
   const waitIssues = lowScoreReviews.filter((review) => review.issueTag === '等待过长').length;
   const topIssue = ['等待过长', '漏品', '缺货', '包装漏液'].map((tag) => ({ tag, count: lowScoreReviews.filter((review) => review.issueTag === tag).length })).sort((a, b) => b.count - a.count)[0];
   const reviewSamples = [...lowScoreReviews].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 6);
-  return <section className="workspace-page"><section className="workspace-hero"><div><p className="eyebrow">诊断中心</p><h2>先做最值得做的一件事</h2><p>诊断不只告诉商家“哪里有问题”，还会给出判断依据和可验证的行动。</p></div><span className="status-pill">✦ 已生成优先级</span></section><section className="priority-card"><span className="priority-index">P1</span><div><p className="eyebrow light">本周最高优先级</p><h2>{actionPlan.title}</h2><p>{actionPlan.basis}</p></div><div className="priority-action"><span>建议先做</span><strong>{actionPlan.actions[0]}</strong></div></section><section className="review-evidence"><article><span>低分评价</span><strong>{lowScoreReviews.length} 条</strong><p>评分 ≤ 3 的真实评价</p></article><article><span>最集中问题</span><strong>{topIssue?.tag || '暂无'}</strong><p>{topIssue?.count || 0} 条评价涉及该问题</p></article><article><span>等待相关</span><strong>{waitIssues} 条</strong><p>可和高峰时段、出餐数据交叉分析</p></article></section><section className="review-samples"><button className="review-toggle" onClick={() => setShowReviewSamples((visible) => !visible)}>{showReviewSamples ? '收起低分评价样本' : `查看 ${lowScoreReviews.length} 条低分评价样本`}<span>{showReviewSamples ? '⌃' : '⌄'}</span></button>{showReviewSamples && <div className="review-sample-list">{reviewSamples.length > 0 ? reviewSamples.map((review) => <article key={`${review.date}-${review.productName}-${review.comment}`}><div className="review-sample-meta"><span>{review.date}</span><span>{review.channel}</span><span>{review.productName}</span><strong>{review.rating} 分</strong></div><p><b>{review.issueTag}</b>{review.comment}</p></article>) : <p className="review-empty">当前数据中没有低分评价。</p>}</div>}</section><section className="action-tracker"><div className="action-tracker-head"><div><p className="eyebrow">本周行动方案</p><h2>执行 {completedActions.length} / {actionPlan.actions.length}</h2></div><div className="action-tracker-tools"><span>本机保存 · 建议 7 天后复盘</span>{completedActions.length > 0 && <button onClick={onClearActions}>清空进度</button>}</div></div>{actionPlan.actions.map((action, index) => <article className={completedActions.includes(action) ? 'action-item completed' : 'action-item'} key={action}><button aria-label={`标记${action}完成`} onClick={() => onToggleAction(action)}>{completedActions.includes(action) ? '✓' : `0${index + 1}`}</button><div><strong>{action}</strong><p>{index === 0 ? '本周开始执行' : index === 1 ? '执行中观察顾客反馈' : '下周用数据验证效果'}</p></div><span>{completedActions.includes(action) ? '已完成' : '待执行'}</span></article>)}</section><section className="diagnosis-board">{insights.map((insight, index) => <article className={`diagnosis-detail ${insight.tone}`} key={insight.title}><div className="diagnosis-number">0{index + 1}</div><div><span>{insight.level}</span><h3>{insight.title}</h3><p>{insight.detail}</p></div><div className="diagnosis-next"><small>下一步</small><strong>{actionPlan.actions[index] || '持续观察相关指标，并在下周复盘。'}</strong></div></article>)}</section></section>;
+  const checkpoints = [
+    { label: '支付转化率', baseline: metrics.conversionRate, target: `≥ ${(Number(metrics.conversionRate.replace('%', '')) + 0.5).toFixed(1)}%`, meaning: '午高峰商品组合与出餐效率' },
+    { label: '复购率', baseline: metrics.repeatPurchaseRate, target: `≥ ${(Number(metrics.repeatPurchaseRate.replace('%', '')) + 2).toFixed(1)}%`, meaning: '复购券与加购组合是否有效' },
+    { label: '外卖好评率', baseline: metrics.deliveryRating, target: `≥ ${(Number(metrics.deliveryRating) + 0.05).toFixed(2)}`, meaning: '低分订单修复是否改善体验' },
+  ];
+  useEffect(() => { setDraftOutcome(reviewNote.outcome); setDraftNote(reviewNote.note); }, [reviewNote]);
+  return <section className="workspace-page"><section className="workspace-hero"><div><p className="eyebrow">诊断中心</p><h2>先做最值得做的一件事</h2><p>诊断不只告诉商家“哪里有问题”，还会给出判断依据和可验证的行动。</p></div><span className="status-pill">✦ 已生成优先级</span></section><section className="priority-card"><span className="priority-index">P1</span><div><p className="eyebrow light">本周最高优先级</p><h2>{actionPlan.title}</h2><p>{actionPlan.basis}</p></div><div className="priority-action"><span>建议先做</span><strong>{actionPlan.actions[0]}</strong></div></section><section className="review-evidence"><article><span>低分评价</span><strong>{lowScoreReviews.length} 条</strong><p>评分 ≤ 3 的真实评价</p></article><article><span>最集中问题</span><strong>{topIssue?.tag || '暂无'}</strong><p>{topIssue?.count || 0} 条评价涉及该问题</p></article><article><span>等待相关</span><strong>{waitIssues} 条</strong><p>可和高峰时段、出餐数据交叉分析</p></article></section><section className="review-samples"><button className="review-toggle" onClick={() => setShowReviewSamples((visible) => !visible)}>{showReviewSamples ? '收起低分评价样本' : `查看 ${lowScoreReviews.length} 条低分评价样本`}<span>{showReviewSamples ? '⌃' : '⌄'}</span></button>{showReviewSamples && <div className="review-sample-list">{reviewSamples.length > 0 ? reviewSamples.map((review) => <article key={`${review.date}-${review.productName}-${review.comment}`}><div className="review-sample-meta"><span>{review.date}</span><span>{review.channel}</span><span>{review.productName}</span><strong>{review.rating} 分</strong></div><p><b>{review.issueTag}</b>{review.comment}</p></article>) : <p className="review-empty">当前数据中没有低分评价。</p>}</div>}</section><section className="action-tracker"><div className="action-tracker-head"><div><p className="eyebrow">本周行动方案</p><h2>执行 {completedActions.length} / {actionPlan.actions.length}</h2></div><div className="action-tracker-tools"><span>本机保存 · 建议 7 天后复盘</span>{completedActions.length > 0 && <button onClick={onClearActions}>清空进度</button>}</div></div>{actionPlan.actions.map((action, index) => <article className={completedActions.includes(action) ? 'action-item completed' : 'action-item'} key={action}><button aria-label={`标记${action}完成`} onClick={() => onToggleAction(action)}>{completedActions.includes(action) ? '✓' : `0${index + 1}`}</button><div><strong>{action}</strong><p>{index === 0 ? '本周开始执行' : index === 1 ? '执行中观察顾客反馈' : '下周用数据验证效果'}</p></div><span>{completedActions.includes(action) ? '已完成' : '待执行'}</span></article>)}</section><section className="review-checkpoint"><div className="review-checkpoint-head"><div><p className="eyebrow">7 天后复盘</p><h2>用目标验证行动有没有效果</h2></div><span>{reviewNote.savedAt ? `已保存 · ${reviewNote.savedAt}` : '等待第一次复盘'}</span></div><p className="review-checkpoint-intro">当前数值是本周基线；下次上传周报后，按下面目标判断行动是否值得保留。</p><div className="checkpoint-table"><div className="checkpoint-row checkpoint-head"><span>指标</span><span>本周基线</span><span>下周验证目标</span><span>对应动作</span></div>{checkpoints.map((checkpoint) => <div className="checkpoint-row" key={checkpoint.label}><strong>{checkpoint.label}</strong><b>{checkpoint.baseline}</b><em>{checkpoint.target}</em><p>{checkpoint.meaning}</p></div>)}</div><div className="review-note-form"><label><span>本轮判断</span><select value={draftOutcome} onChange={(event) => setDraftOutcome(event.target.value)}><option>观察中</option><option>已验证有效</option><option>需要调整</option></select></label><label><span>复盘备注</span><textarea value={draftNote} onChange={(event) => setDraftNote(event.target.value)} placeholder="例如：午高峰套餐已测试 5 天，转化有所改善；下周继续观察。" /></label><div className="review-note-actions"><button onClick={() => onSaveReviewNote(draftOutcome, draftNote)}>保存本机复盘</button>{reviewNote.savedAt && <button className="clear-review" onClick={onClearReviewNote}>清空</button>}</div></div></section><section className="diagnosis-board">{insights.map((insight, index) => <article className={`diagnosis-detail ${insight.tone}`} key={insight.title}><div className="diagnosis-number">0{index + 1}</div><div><span>{insight.level}</span><h3>{insight.title}</h3><p>{insight.detail}</p></div><div className="diagnosis-next"><small>下一步</small><strong>{actionPlan.actions[index] || '持续观察相关指标，并在下周复盘。'}</strong></div></article>)}</section></section>;
 }
 
 function ProductWorkspace({ products, productSource, productUploadMessage, onUpload }: { products: ProductRecord[]; productSource: string; productUploadMessage: string; onUpload: (event: ChangeEvent<HTMLInputElement>) => void }) {
