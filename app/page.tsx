@@ -45,6 +45,11 @@ type DailyRecord = { date: string; visitors: number; orders: number; paidOrders:
 type ReviewRecord = { date: string; channel: string; productName: string; rating: number; issueTag: string; comment: string };
 type ReviewNote = { outcome: string; note: string; savedAt: string };
 type AnalysisRange = 7 | 14 | 28 | 180 | 365;
+type SavedWeeklyUpload = { record: MetricRecord; fileName: string };
+type SavedProductUpload = { records: ProductRecord[]; fileName: string };
+
+const weeklyUploadStorageKey = 'merchantmind-weekly-upload';
+const productUploadStorageKey = 'merchantmind-product-upload';
 
 function readWeeklyMetrics(csv: string): MetricRecord {
   const lines = csv.trim().split(/\r?\n/).filter(Boolean);
@@ -264,8 +269,16 @@ export default function Home() {
     : tab === '经营数据'
       ? '让每一条经营数据都能支持一个判断。'
       : tab === 'AI 诊断'
-        ? '把指标变化，转成清晰的下一步行动。'
+      ? '把指标变化，转成清晰的下一步行动。'
         : '找到值得持续投入的商品机会。';
+  const rangeLabel = analysisRange === 7 ? '近 7 天' : analysisRange === 14 ? '近 14 天' : analysisRange === 28 ? '近 1 月' : analysisRange === 180 ? '近 6 个月' : '近 1 年';
+  const topbarContext = tab === '经营数据'
+    ? `经营数据 · ${rangeLabel} · 已加载 ${dailyMetrics.length} 天历史数据`
+    : tab === '商品分析'
+      ? `商品分析 · ${productSource}`
+      : `${tab} · 2026/08/18 — 08/24 · ${dataSource}`;
+  const hasSavedWeeklyUpload = dataSource.startsWith('已上传') || dataSource.startsWith('已从本机恢复');
+  const hasSavedProductUpload = productSource.startsWith('已上传') || productSource.startsWith('已从本机恢复');
 
   function applyMetricRecord(record: MetricRecord, source: string) {
     setMetrics({
@@ -306,9 +319,10 @@ export default function Home() {
       try {
         const record = readWeeklyMetrics(String(reader.result));
         applyMetricRecord(record, `已上传 ${file.name}`);
+        window.localStorage.setItem(weeklyUploadStorageKey, JSON.stringify({ record, fileName: file.name } satisfies SavedWeeklyUpload));
         setCompletedActions([]);
         clearReviewNote();
-        setUploadMessage('上传成功：看板和诊断已按新数据刷新');
+        setUploadMessage('上传成功：看板和诊断已按新数据刷新，数据已保存在当前浏览器');
       } catch (error) {
         setUploadMessage(error instanceof Error ? `上传失败：${error.message}` : '上传失败，请检查文件格式');
       }
@@ -327,15 +341,42 @@ export default function Home() {
     const reader = new FileReader();
     reader.onload = () => {
       try {
-        setProducts(readProductMetrics(String(reader.result)));
+        const records = readProductMetrics(String(reader.result));
+        setProducts(records);
         setProductSource(`已上传 ${file.name}`);
-        setProductUploadMessage('上传成功：商品机会已按新数据重新排序');
+        window.localStorage.setItem(productUploadStorageKey, JSON.stringify({ records, fileName: file.name } satisfies SavedProductUpload));
+        setProductUploadMessage('上传成功：商品机会已按新数据重新排序，数据已保存在当前浏览器');
       } catch (error) {
         setProductUploadMessage(error instanceof Error ? `上传失败：${error.message}` : '上传失败，请检查文件格式');
       }
     };
     reader.readAsText(file, 'utf-8');
     event.target.value = '';
+  }
+
+  function restoreDemoMetrics() {
+    window.localStorage.removeItem(weeklyUploadStorageKey);
+    fetch('/data/weekly_metrics.csv')
+      .then((response) => response.text())
+      .then((csv) => {
+        applyMetricRecord(readWeeklyMetrics(csv), '已恢复 weekly_metrics.csv');
+        setCompletedActions([]);
+        clearReviewNote();
+        setUploadMessage('已恢复演示经营数据');
+      })
+      .catch(() => setUploadMessage('恢复失败：演示经营数据暂时不可用'));
+  }
+
+  function restoreDemoProducts() {
+    window.localStorage.removeItem(productUploadStorageKey);
+    fetch('/data/product_metrics.csv')
+      .then((response) => response.text())
+      .then((csv) => {
+        setProducts(readProductMetrics(csv));
+        setProductSource('已恢复 product_metrics.csv');
+        setProductUploadMessage('已恢复演示商品明细');
+      })
+      .catch(() => setProductUploadMessage('恢复失败：演示商品明细暂时不可用'));
   }
 
   async function submitQuestion(nextQuestion = question) {
@@ -372,6 +413,18 @@ export default function Home() {
   }
 
   useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(weeklyUploadStorageKey);
+      if (saved) {
+        const upload = JSON.parse(saved) as SavedWeeklyUpload;
+        if (upload.fileName && upload.record) {
+          applyMetricRecord(upload.record, `已从本机恢复 ${upload.fileName}`);
+          return;
+        }
+      }
+    } catch {
+      window.localStorage.removeItem(weeklyUploadStorageKey);
+    }
     fetch('/data/weekly_metrics.csv')
       .then((response) => response.text())
       .then((csv) => {
@@ -425,6 +478,19 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(productUploadStorageKey);
+      if (saved) {
+        const upload = JSON.parse(saved) as SavedProductUpload;
+        if (upload.fileName && Array.isArray(upload.records)) {
+          setProducts(upload.records);
+          setProductSource(`已从本机恢复 ${upload.fileName}`);
+          return;
+        }
+      }
+    } catch {
+      window.localStorage.removeItem(productUploadStorageKey);
+    }
     fetch('/data/product_metrics.csv')
       .then((response) => response.text())
       .then((csv) => {
@@ -453,7 +519,7 @@ export default function Home() {
       <div className="sidebar-footer"><span className="avatar">张</span><div><strong>子月的作品集</strong><small>演示模式</small></div></div>
     </aside>
     <section className="content">
-      <header className="topbar"><div><p className="eyebrow">{tab} · 2026/08/18 — 08/24 · {dataSource}</p><h1>{pageTitle}</h1>{uploadMessage && <p className={`upload-message ${uploadMessage.startsWith('上传成功') ? 'success' : 'error'}`}>{uploadMessage}</p>}</div><div><input ref={fileInputRef} className="file-input" type="file" accept=".csv,text/csv" onChange={handleUpload}/><button className="upload" onClick={() => fileInputRef.current?.click()}>＋ 上传经营数据</button><p className="upload-hint">支持核心指标 CSV 上传 · <a href="/data/weekly_metrics.csv" download="经营周报案例.csv">下载案例</a></p></div></header>
+      <header className="topbar"><div><p className="eyebrow">{topbarContext}</p><h1>{pageTitle}</h1>{uploadMessage && <p className={`upload-message ${uploadMessage.startsWith('上传成功') || uploadMessage.startsWith('已恢复') ? 'success' : 'error'}`}>{uploadMessage}</p>}</div><div><input ref={fileInputRef} className="file-input" type="file" accept=".csv,text/csv" onChange={handleUpload}/><button className="upload" onClick={() => fileInputRef.current?.click()}>＋ 上传经营数据</button>{hasSavedWeeklyUpload && <button className="restore-demo" onClick={restoreDemoMetrics}>恢复演示数据</button>}<p className="upload-hint">支持核心指标 CSV 上传 · <a href="/data/weekly_metrics.csv" download="经营周报案例.csv">下载案例</a></p></div></header>
       {tab === '总览' ? <><section className="hero-card"><div><p className="eyebrow light">本周经营健康度</p><div className="score-row"><strong>82</strong><span>/ 100</span><b>↑ 6 分</b></div><p>整体稳定，午高峰转化和外卖体验值得优先处理。</p></div><div className="hero-action"><span>✦ AI 本周结论</span><strong>{actionPlan.title}</strong><button onClick={() => setReport(!report)}>{report ? '收起行动方案' : '生成行动方案 →'}</button></div></section>
       {report && <section className="report"><strong>已根据当前数据生成 3 项优先动作</strong><p className="decision-basis">判断依据：{actionPlan.basis}</p><ol className="report-list">{actionPlan.actions.map((action) => <li key={action}>{action}</li>)}</ol></section>}
       <section className="metrics" aria-label="核心指标"><Metric label="GMV" value={metrics.gmv} change="↑ 12.4%" /><Metric label="支付转化率" value={metrics.conversionRate} change="↓ 1.6%" down/><Metric label="复购率" value={metrics.repeatPurchaseRate} change="↑ 3.1%"/><Metric label="外卖好评率" value={metrics.deliveryRating} change="↓ 0.08" down/></section>
@@ -463,7 +529,7 @@ export default function Home() {
       </section>
       <section className="panel ask"><div><p className="eyebrow">问问你的 AI 运营助手</p><h2>“为什么这周 GMV 增长了，转化率却下降？”</h2></div><button onClick={() => setAskOpen(!askOpen)}>{askOpen ? '收起问答' : '开始分析'} <span>→</span></button></section>
       {askOpen && <section className="ask-workspace" aria-label="运营问答"><div className="ask-intro"><div><p className="eyebrow">数据问答</p><h2>基于当前上传的经营数据提问</h2></div><span>{useModel ? '大模型优先' : '规则版回答'}</span></div><label className="model-switch"><input type="checkbox" checked={useModel} onChange={(event) => setUseModel(event.target.checked)}/><span>优先使用 OpenAI 大模型生成回答</span><small>未开通额度时自动使用规则版</small></label><div className="question-chips"><button onClick={() => submitQuestion('为什么这周 GMV 增长了，转化率却下降？')}>GMV 与转化</button><button onClick={() => submitQuestion('如何提高复购？')}>如何提高复购？</button><button onClick={() => submitQuestion('外卖评分需要处理吗？')}>外卖评分需要处理吗？</button></div><div className="question-form"><input value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') submitQuestion(); }} aria-label="输入经营问题" placeholder="例如：应该先做引流还是复购？"/><button disabled={isAnalyzing} onClick={() => submitQuestion()}>{isAnalyzing ? '分析中…' : '分析'}</button></div>{answer && <div className="answer-card"><span>✦ {answerSource || '分析结果'}</span><p>{answer}</p></div>}</section>}
-      </> : tab === '经营数据' ? <DataWorkspace metrics={metrics} dataSource={dataSource} dailyMetrics={dailyMetrics} analysisRange={analysisRange} onChangeRange={setAnalysisRange} /> : tab === 'AI 诊断' ? <DiagnosisWorkspace actionPlan={actionPlan} reviews={reviews} dailyMetrics={dailyMetrics} metrics={metrics} completedActions={completedActions} reviewNote={reviewNote} onToggleAction={toggleAction} onClearActions={clearActions} onSaveReviewNote={saveReviewNote} onClearReviewNote={clearReviewNote} /> : <ProductWorkspace products={products} productSource={productSource} productUploadMessage={productUploadMessage} onUpload={handleProductUpload} />}
+      </> : tab === '经营数据' ? <DataWorkspace metrics={metrics} dataSource={dataSource} dailyMetrics={dailyMetrics} analysisRange={analysisRange} onChangeRange={setAnalysisRange} /> : tab === 'AI 诊断' ? <DiagnosisWorkspace actionPlan={actionPlan} reviews={reviews} dailyMetrics={dailyMetrics} metrics={metrics} completedActions={completedActions} reviewNote={reviewNote} onToggleAction={toggleAction} onClearActions={clearActions} onSaveReviewNote={saveReviewNote} onClearReviewNote={clearReviewNote} /> : <ProductWorkspace products={products} productSource={productSource} productUploadMessage={productUploadMessage} onUpload={handleProductUpload} onRestoreDemo={restoreDemoProducts} showRestoreDemo={hasSavedProductUpload} />}
     </section>
   </main>;
 }
@@ -573,7 +639,7 @@ function DiagnosisWorkspace({ actionPlan, reviews, dailyMetrics, metrics, comple
   </section>;
 }
 
-function ProductWorkspace({ products, productSource, productUploadMessage, onUpload }: { products: ProductRecord[]; productSource: string; productUploadMessage: string; onUpload: (event: ChangeEvent<HTMLInputElement>) => void }) {
+function ProductWorkspace({ products, productSource, productUploadMessage, onUpload, onRestoreDemo, showRestoreDemo }: { products: ProductRecord[]; productSource: string; productUploadMessage: string; onUpload: (event: ChangeEvent<HTMLInputElement>) => void; onRestoreDemo: () => void; showRestoreDemo: boolean }) {
   const productInputRef = useRef<HTMLInputElement>(null);
   const [productFilter, setProductFilter] = useState<'全部' | '需要处理' | '增长机会' | '持续观察'>('全部');
   const productCards = products.map((product) => {
@@ -598,9 +664,9 @@ function ProductWorkspace({ products, productSource, productUploadMessage, onUpl
   return <section className="workspace-page">
     <section className="workspace-hero product-workspace-hero">
       <div><p className="eyebrow">商品机会 · {productSource}</p><h2>用商品明细找到增长与风险</h2><p>当前判断同时参考销量、收入、毛利、复购、评分和缺货次数。</p></div>
-      <div className="product-header-actions"><input ref={productInputRef} className="file-input" type="file" accept=".csv,text/csv" onChange={onUpload}/><button onClick={() => productInputRef.current?.click()}>＋ 上传商品明细</button><a className="product-template-download" href="/data/product_metrics.csv" download="商品明细案例.csv">下载案例</a><details className="field-requirements"><summary>查看字段要求</summary><p>商品名称、品类、销量、收入、毛利率、复购率、评分、缺货次数。</p></details><span className="status-pill">{products.length || '…'} 个商品已分析</span></div>
+      <div className="product-header-actions"><input ref={productInputRef} className="file-input" type="file" accept=".csv,text/csv" onChange={onUpload}/><button onClick={() => productInputRef.current?.click()}>＋ 上传商品明细</button>{showRestoreDemo && <button className="product-restore-demo" onClick={onRestoreDemo}>恢复演示数据</button>}<a className="product-template-download" href="/data/product_metrics.csv" download="商品明细案例.csv">下载案例</a><details className="field-requirements"><summary>查看字段要求</summary><p>商品名称、品类、销量、收入、毛利率、复购率、评分、缺货次数。</p></details><span className="status-pill">{products.length || '…'} 个商品已分析</span></div>
     </section>
-    {productUploadMessage && <p className={`product-upload-message top-message ${productUploadMessage.startsWith('上传成功') ? 'success' : 'error'}`}>{productUploadMessage}</p>}
+    {productUploadMessage && <p className={`product-upload-message top-message ${productUploadMessage.startsWith('上传成功') || productUploadMessage.startsWith('已恢复') ? 'success' : 'error'}`}>{productUploadMessage}</p>}
     <section className="product-summary"><article><span>商品收入合计</span><strong>¥{totalRevenue.toLocaleString('zh-CN')}</strong></article><article><span>需要优先处理</span><strong>{productCards.filter((item) => item.tone === 'alert').length} 个</strong></article><article><span>复购增长机会</span><strong>{productCards.filter((item) => item.level === '增长机会').length} 个</strong></article></section>
     <section className="product-filter" aria-label="商品分析筛选">{productFilters.map((filter) => <button className={productFilter === filter.value ? 'active' : ''} aria-pressed={productFilter === filter.value} key={filter.value} onClick={() => setProductFilter(filter.value)}>{filter.label}<span>{filter.count}</span></button>)}</section>
     <p className="product-filter-guidance"><b>当前怎么做：</b>{filterGuidance}</p>
