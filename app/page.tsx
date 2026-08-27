@@ -575,12 +575,20 @@ function DiagnosisWorkspace({ actionPlan, reviews, dailyMetrics, metrics, comple
 
 function ProductWorkspace({ products, productSource, productUploadMessage, onUpload }: { products: ProductRecord[]; productSource: string; productUploadMessage: string; onUpload: (event: ChangeEvent<HTMLInputElement>) => void }) {
   const productInputRef = useRef<HTMLInputElement>(null);
+  const [productFilter, setProductFilter] = useState<'全部' | '需要处理' | '增长机会' | '持续观察'>('全部');
   const productCards = products.map((product) => {
     if (product.rating < 4.7 || product.outOfStockCount > 0) return { product, level: '需要处理', detail: `评分 ${product.rating.toFixed(2)}，缺货 ${product.outOfStockCount} 次，体验可能影响后续购买。`, action: '检查低分反馈与缺货原因，优先修复体验问题。', tone: 'alert' };
     if (product.repeatPurchaseRate >= 0.3) return { product, level: '增长机会', detail: `复购率 ${(product.repeatPurchaseRate * 100).toFixed(0)}%，高于本项目设定的 30% 增长线。`, action: '搭配高毛利商品测试“第二杯 / 加购”组合。', tone: 'good' };
     return { product, level: '持续观察', detail: `销量 ${product.unitsSold} 件，毛利率 ${(product.grossMargin * 100).toFixed(0)}%，暂未发现紧急风险。`, action: '保留商品并持续观察销量、评分与复购变化。', tone: 'neutral' };
   }).sort((a, b) => (a.tone === 'alert' ? -1 : b.tone === 'alert' ? 1 : b.product.revenue - a.product.revenue));
   const totalRevenue = products.reduce((sum, product) => sum + product.revenue, 0);
+  const productFilters = [
+    { label: '全部', value: '全部' as const, count: productCards.length },
+    { label: '优先处理', value: '需要处理' as const, count: productCards.filter((item) => item.level === '需要处理').length },
+    { label: '增长机会', value: '增长机会' as const, count: productCards.filter((item) => item.level === '增长机会').length },
+    { label: '持续观察', value: '持续观察' as const, count: productCards.filter((item) => item.level === '持续观察').length },
+  ];
+  const visibleProductCards = productFilter === '全部' ? productCards : productCards.filter((item) => item.level === productFilter);
   return <section className="workspace-page">
     <section className="workspace-hero product-workspace-hero">
       <div><p className="eyebrow">商品机会 · {productSource}</p><h2>用商品明细找到增长与风险</h2><p>当前判断同时参考销量、收入、毛利、复购、评分和缺货次数。</p></div>
@@ -588,6 +596,7 @@ function ProductWorkspace({ products, productSource, productUploadMessage, onUpl
     </section>
     {productUploadMessage && <p className={`product-upload-message top-message ${productUploadMessage.startsWith('上传成功') ? 'success' : 'error'}`}>{productUploadMessage}</p>}
     <section className="product-summary"><article><span>商品收入合计</span><strong>¥{totalRevenue.toLocaleString('zh-CN')}</strong></article><article><span>需要优先处理</span><strong>{productCards.filter((item) => item.tone === 'alert').length} 个</strong></article><article><span>复购增长机会</span><strong>{productCards.filter((item) => item.level === '增长机会').length} 个</strong></article></section>
-    <section className="product-grid">{productCards.map(({ product, level, detail, action, tone }) => <article className="product-card" key={product.productName}><div className="product-top"><span className={`tag ${tone}`}>{level}</span><b>收入 ¥{product.revenue.toLocaleString('zh-CN')}</b></div><h3>{product.productName}</h3><p>{detail}</p><div className="product-meta"><span>{product.category}</span><span>销量 {product.unitsSold}</span><span>毛利 {(product.grossMargin * 100).toFixed(0)}%</span></div><div className="product-action"><small>建议动作</small><strong>{action}</strong></div></article>)}</section>
+    <section className="product-filter" aria-label="商品分析筛选">{productFilters.map((filter) => <button className={productFilter === filter.value ? 'active' : ''} aria-pressed={productFilter === filter.value} key={filter.value} onClick={() => setProductFilter(filter.value)}>{filter.label}<span>{filter.count}</span></button>)}</section>
+    <section className="product-grid">{visibleProductCards.map(({ product, level, detail, action, tone }) => <article className="product-card" key={product.productName}><div className="product-top"><span className={`tag ${tone}`}>{level}</span><b>收入 ¥{product.revenue.toLocaleString('zh-CN')}</b></div><h3>{product.productName}</h3><p>{detail}</p><div className="product-meta"><span>{product.category}</span><span>销量 {product.unitsSold}</span><span>毛利 {(product.grossMargin * 100).toFixed(0)}%</span></div><div className="product-action"><small>建议动作</small><strong>{action}</strong></div></article>)}{visibleProductCards.length === 0 && <p className="product-empty">当前没有符合这个分类的商品。</p>}</section>
   </section>;
 }
