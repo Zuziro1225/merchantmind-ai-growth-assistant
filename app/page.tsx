@@ -2,6 +2,7 @@
 
 import { ChangeEvent, useEffect, useRef, useState } from 'react';
 import './workspaces.css';
+import './upload.css';
 
 const initialMetrics = {
   gmv: '¥48,620',
@@ -248,7 +249,7 @@ export default function Home() {
       <div className="sidebar-footer"><span className="avatar">张</span><div><strong>子月的作品集</strong><small>演示模式</small></div></div>
     </aside>
     <section className="content">
-      <header className="topbar"><div><p className="eyebrow">{tab} · 2026/08/18 — 08/24 · {dataSource}</p><h1>{pageTitle}</h1>{uploadMessage && <p className={`upload-message ${uploadMessage.startsWith('上传成功') ? 'success' : 'error'}`}>{uploadMessage}</p>}</div><div><input ref={fileInputRef} className="file-input" type="file" accept=".csv,text/csv" onChange={handleUpload}/><button className="upload" onClick={() => fileInputRef.current?.click()}>＋ 上传经营数据</button><p className="upload-hint">支持 weekly_metrics.csv 格式</p></div></header>
+      <header className="topbar"><div><p className="eyebrow">{tab} · 2026/08/18 — 08/24 · {dataSource}</p><h1>{pageTitle}</h1>{uploadMessage && <p className={`upload-message ${uploadMessage.startsWith('上传成功') ? 'success' : 'error'}`}>{uploadMessage}</p>}</div><div><input ref={fileInputRef} className="file-input" type="file" accept=".csv,text/csv" onChange={handleUpload}/><button className="upload" onClick={() => fileInputRef.current?.click()}>＋ 上传经营数据</button><p className="upload-hint">支持 weekly_metrics.csv 格式 · <a href="/data/weekly_metrics_template.csv" download>下载模板</a></p></div></header>
       {tab === '总览' ? <><section className="hero-card"><div><p className="eyebrow light">本周经营健康度</p><div className="score-row"><strong>82</strong><span>/ 100</span><b>↑ 6 分</b></div><p>整体稳定，午高峰转化和外卖体验值得优先处理。</p></div><div className="hero-action"><span>✦ AI 本周结论</span><strong>{actionPlan.title}</strong><button onClick={() => setReport(!report)}>{report ? '收起行动方案' : '生成行动方案 →'}</button></div></section>
       {report && <section className="report"><strong>已根据当前数据生成 3 项优先动作</strong><p className="decision-basis">判断依据：{actionPlan.basis}</p><ol className="report-list">{actionPlan.actions.map((action) => <li key={action}>{action}</li>)}</ol></section>}
       <section className="metrics" aria-label="核心指标"><Metric label="GMV" value={metrics.gmv} change="↑ 12.4%" /><Metric label="支付转化率" value={metrics.conversionRate} change="↓ 1.6%" down/><Metric label="复购率" value={metrics.repeatPurchaseRate} change="↑ 3.1%"/><Metric label="外卖好评率" value={metrics.deliveryRating} change="↓ 0.08" down/></section>
@@ -273,7 +274,7 @@ function DataWorkspace({ metrics, dataSource }: { metrics: typeof initialMetrics
   ];
   return <section className="workspace-page">
     <section className="workspace-hero"><div><p className="eyebrow">数据接入</p><h2>当前数据快照已准备好</h2><p>先确保数据正确，再让 AI 基于同一份事实给出建议。</p></div><span className="status-pill">● 数据已就绪</span></section>
-    <section className="data-summary-grid"><article className="panel source-panel"><p className="eyebrow">数据来源</p><h2>{dataSource}</h2><p>支持上传 weekly_metrics.csv。上传后，看板、诊断和问答会同步刷新。</p><div className="source-status"><span>核心字段</span><strong>4 / 4 已完整</strong></div></article><article className="panel quality-panel"><p className="eyebrow">数据质量检查</p><h2>可以开始分析</h2><ul><li><span>✓</span> 四个核心指标均为数值</li><li><span>✓</span> 已用于经营看板和规则诊断</li><li><span>!</span> 当前为周汇总，趋势判断需补充按天数据</li></ul></article></section>
+    <section className="data-summary-grid"><article className="panel source-panel"><p className="eyebrow">数据来源</p><h2>{dataSource}</h2><p>支持上传 weekly_metrics.csv。上传后，看板、诊断和问答会同步刷新。</p><div className="source-status"><span>核心字段</span><strong>4 / 4 已完整</strong></div></article><article className="panel quality-panel"><p className="eyebrow">数据质量检查</p><h2>可以开始分析</h2><ul><li><span>✓</span> 四个核心指标均为数值</li><li><span>✓</span> 已用于经营看板和规则诊断</li><li><span>!</span> 当前为周汇总，趋势判断需补充按天数据</li></ul><a className="template-download" href="/data/weekly_metrics_template.csv" download>↓ 下载可直接填写的 CSV 模板</a></article></section>
     <section className="panel field-panel"><div className="panel-head"><div><p className="eyebrow">字段字典</p><h2>每个数字具体代表什么？</h2></div><span className="period">经营周报</span></div><div className="field-table"><div className="field-row field-head"><span>字段</span><span>当前值</span><span>业务意义</span></div>{fields.map((field) => <div className="field-row" key={field.label}><strong>{field.label}</strong><b>{field.value}</b><p>{field.description}</p></div>)}</div></section>
   </section>;
 }
