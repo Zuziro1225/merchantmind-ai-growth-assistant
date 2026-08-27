@@ -589,6 +589,12 @@ function ProductWorkspace({ products, productSource, productUploadMessage, onUpl
     { label: '持续观察', value: '持续观察' as const, count: productCards.filter((item) => item.level === '持续观察').length },
   ];
   const visibleProductCards = productFilter === '全部' ? productCards : productCards.filter((item) => item.level === productFilter);
+  const filterGuidance = {
+    全部: `先处理 ${productCards.filter((item) => item.level === '需要处理').length} 个体验或缺货风险商品，再从增长机会中挑 1 个做小范围测试。`,
+    需要处理: '已按风险优先展示：先解决缺货和低评分，再观察评分与复购是否回升。',
+    增长机会: '从中选择 1 个商品做加购或套餐测试，并在下个周期对比客单价与复购率。',
+    持续观察: '这些商品暂未发现紧急风险；保持记录，等数据出现变化后再介入。',
+  }[productFilter];
   return <section className="workspace-page">
     <section className="workspace-hero product-workspace-hero">
       <div><p className="eyebrow">商品机会 · {productSource}</p><h2>用商品明细找到增长与风险</h2><p>当前判断同时参考销量、收入、毛利、复购、评分和缺货次数。</p></div>
@@ -597,6 +603,7 @@ function ProductWorkspace({ products, productSource, productUploadMessage, onUpl
     {productUploadMessage && <p className={`product-upload-message top-message ${productUploadMessage.startsWith('上传成功') ? 'success' : 'error'}`}>{productUploadMessage}</p>}
     <section className="product-summary"><article><span>商品收入合计</span><strong>¥{totalRevenue.toLocaleString('zh-CN')}</strong></article><article><span>需要优先处理</span><strong>{productCards.filter((item) => item.tone === 'alert').length} 个</strong></article><article><span>复购增长机会</span><strong>{productCards.filter((item) => item.level === '增长机会').length} 个</strong></article></section>
     <section className="product-filter" aria-label="商品分析筛选">{productFilters.map((filter) => <button className={productFilter === filter.value ? 'active' : ''} aria-pressed={productFilter === filter.value} key={filter.value} onClick={() => setProductFilter(filter.value)}>{filter.label}<span>{filter.count}</span></button>)}</section>
+    <p className="product-filter-guidance"><b>当前怎么做：</b>{filterGuidance}</p>
     <section className="product-grid">{visibleProductCards.map(({ product, level, detail, action, tone }) => <article className="product-card" key={product.productName}><div className="product-top"><span className={`tag ${tone}`}>{level}</span><b>收入 ¥{product.revenue.toLocaleString('zh-CN')}</b></div><h3>{product.productName}</h3><p>{detail}</p><div className="product-meta"><span>{product.category}</span><span>销量 {product.unitsSold}</span><span>毛利 {(product.grossMargin * 100).toFixed(0)}%</span></div><div className="product-action"><small>建议动作</small><strong>{action}</strong></div></article>)}{visibleProductCards.length === 0 && <p className="product-empty">当前没有符合这个分类的商品。</p>}</section>
   </section>;
 }
