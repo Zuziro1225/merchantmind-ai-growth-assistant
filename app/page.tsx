@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { ChangeEvent, useEffect, useRef, useState } from 'react';
 
 const initialMetrics = {
   gmv: '¥48,620',
@@ -13,6 +13,26 @@ const insights = [
   { level: '增长机会', title: '“燕麦拿铁”有复购潜力', detail: '近 30 天复购率 31%，高出门店平均值 9 个百分点。', tone: 'good' },
   { level: '需要验证', title: '外卖评分出现波动', detail: '周三晚高峰的低分评价集中在出餐等待时间。', tone: 'neutral' },
 ];
+
+const requiredMetricFields = ['gmv', 'payment_conversion_rate', 'repeat_purchase_rate', 'delivery_rating'];
+
+type MetricRecord = Record<string, string>;
+
+function readWeeklyMetrics(csv: string): MetricRecord {
+  const lines = csv.trim().split(/\r?\n/).filter(Boolean);
+  if (lines.length < 2) throw new Error('文件中需要包含表头和至少一行数据');
+
+  const headers = lines[0].split(',').map((item) => item.trim());
+  const values = lines[1].split(',').map((item) => item.trim());
+  const record = Object.fromEntries(headers.map((header, index) => [header, values[index] ?? '']));
+  const missing = requiredMetricFields.filter((field) => !record[field]);
+
+  if (missing.length) throw new Error('缺少必填字段：' + missing.join('、'));
+  if (requiredMetricFields.some((field) => Number.isNaN(Number(record[field])))) {
+    throw new Error('4 个核心指标必须是数字');
+  }
+  return record;
+}
 
 function getConversionInsight(conversionRate: number) {
   if (conversionRate < 0.08) {
@@ -53,25 +73,49 @@ export default function Home() {
   const [report, setReport] = useState(false);
   const [metrics, setMetrics] = useState(initialMetrics);
   const [dataSource, setDataSource] = useState('正在读取 CSV 数据…');
+  const [uploadMessage, setUploadMessage] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [peakHourInsight, setPeakHourInsight] = useState({ level: '分析中', title: '正在读取午高峰数据', detail: '稍后将根据等待时间与转化率完成诊断。', tone: 'neutral' });
   const conversionRate = Number(metrics.conversionRate.replace('%', '')) / 100;
   const diagnosisInsights = [getConversionInsight(conversionRate), peakHourInsight, ...insights];
+
+  function applyMetricRecord(record: MetricRecord, source: string) {
+    setMetrics({
+      gmv: `¥${Number(record.gmv).toLocaleString('zh-CN')}`,
+      conversionRate: `${(Number(record.payment_conversion_rate) * 100).toFixed(1)}%`,
+      repeatPurchaseRate: `${(Number(record.repeat_purchase_rate) * 100).toFixed(1)}%`,
+      deliveryRating: Number(record.delivery_rating).toFixed(2),
+    });
+    setDataSource(source);
+  }
+
+  function handleUpload(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith('.csv')) {
+      setUploadMessage('请选择 CSV 格式的经营数据文件');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const record = readWeeklyMetrics(String(reader.result));
+        applyMetricRecord(record, `已上传 ${file.name}`);
+        setUploadMessage('上传成功：看板和诊断已按新数据刷新');
+      } catch (error) {
+        setUploadMessage(error instanceof Error ? `上传失败：${error.message}` : '上传失败，请检查文件格式');
+      }
+    };
+    reader.readAsText(file, 'utf-8');
+    event.target.value = '';
+  }
 
   useEffect(() => {
     fetch('/data/weekly_metrics.csv')
       .then((response) => response.text())
       .then((csv) => {
-        const [headerLine, valueLine] = csv.trim().split('\n');
-        const headers = headerLine.split(',');
-        const values = valueLine.split(',');
-        const record = Object.fromEntries(headers.map((header, index) => [header, values[index]]));
-        setMetrics({
-          gmv: `¥${Number(record.gmv).toLocaleString('zh-CN')}`,
-          conversionRate: `${(Number(record.payment_conversion_rate) * 100).toFixed(1)}%`,
-          repeatPurchaseRate: `${(Number(record.repeat_purchase_rate) * 100).toFixed(1)}%`,
-          deliveryRating: Number(record.delivery_rating).toFixed(2),
-        });
-        setDataSource('已读取 weekly_metrics.csv');
+        applyMetricRecord(readWeeklyMetrics(csv), '已读取 weekly_metrics.csv');
       })
       .catch(() => setDataSource('暂时使用演示数据'));
   }, []);
@@ -95,7 +139,7 @@ export default function Home() {
       <div className="sidebar-footer"><span className="avatar">张</span><div><strong>子月的作品集</strong><small>演示模式</small></div></div>
     </aside>
     <section className="content">
-      <header className="topbar"><div><p className="eyebrow">经营总览 · 2026/08/18 — 08/24 · {dataSource}</p><h1>我是子月，我正在用 AI 帮商家找到增长机会。</h1></div><button className="upload">＋ 上传经营数据</button></header>
+      <header className="topbar"><div><p className="eyebrow">经营总览 · 2026/08/18 — 08/24 · {dataSource}</p><h1>我是子月，我正在用 AI 帮商家找到增长机会。</h1>{uploadMessage && <p className={`upload-message ${uploadMessage.startsWith('上传成功') ? 'success' : 'error'}`}>{uploadMessage}</p>}</div><div><input ref={fileInputRef} className="file-input" type="file" accept=".csv,text/csv" onChange={handleUpload}/><button className="upload" onClick={() => fileInputRef.current?.click()}>＋ 上传经营数据</button><p className="upload-hint">支持 weekly_metrics.csv 格式</p></div></header>
       <section className="hero-card"><div><p className="eyebrow light">本周经营健康度</p><div className="score-row"><strong>82</strong><span>/ 100</span><b>↑ 6 分</b></div><p>整体稳定，午高峰转化和外卖体验值得优先处理。</p></div><div className="hero-action"><span>✦ AI 本周结论</span><strong>先优化午高峰的<br/>商品组合与出餐效率</strong><button onClick={() => setReport(!report)}>{report ? '已生成行动方案' : '生成行动方案 →'}</button></div></section>
       {report && <section className="report"><strong>已为你生成 3 项优先动作：</strong> ① 午高峰推出「拿铁 + 可颂」套餐；② 预制高频原料，缩短出餐；③ 回访本周低分外卖订单。</section>}
       <section className="metrics" aria-label="核心指标"><Metric label="GMV" value={metrics.gmv} change="↑ 12.4%" /><Metric label="支付转化率" value={metrics.conversionRate} change="↓ 1.6%" down/><Metric label="复购率" value={metrics.repeatPurchaseRate} change="↑ 3.1%"/><Metric label="外卖好评率" value={metrics.deliveryRating} change="↓ 0.08" down/></section>
