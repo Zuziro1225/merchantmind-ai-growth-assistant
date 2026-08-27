@@ -43,6 +43,7 @@ type ProductRecord = {
 type DailyRecord = { date: string; visitors: number; orders: number; paidOrders: number; gmv: number; avgWaitMinutes: number; deliveryRating: number };
 type ReviewRecord = { date: string; channel: string; productName: string; rating: number; issueTag: string; comment: string };
 type ReviewNote = { outcome: string; note: string; savedAt: string };
+type AnalysisRange = 7 | 14 | 28 | 180 | 365;
 
 function readWeeklyMetrics(csv: string): MetricRecord {
   const lines = csv.trim().split(/\r?\n/).filter(Boolean);
@@ -228,6 +229,7 @@ function answerBusinessQuestion(question: string, metrics: typeof initialMetrics
 
 export default function Home() {
   const [tab, setTab] = useState('总览');
+  const [analysisRange, setAnalysisRange] = useState<AnalysisRange>(7);
   const [report, setReport] = useState(false);
   const [completedActions, setCompletedActions] = useState<string[]>([]);
   const [actionProgressReady, setActionProgressReady] = useState(false);
@@ -460,27 +462,30 @@ export default function Home() {
       </section>
       <section className="panel ask"><div><p className="eyebrow">问问你的 AI 运营助手</p><h2>“为什么这周 GMV 增长了，转化率却下降？”</h2></div><button onClick={() => setAskOpen(!askOpen)}>{askOpen ? '收起问答' : '开始分析'} <span>→</span></button></section>
       {askOpen && <section className="ask-workspace" aria-label="运营问答"><div className="ask-intro"><div><p className="eyebrow">数据问答</p><h2>基于当前上传的经营数据提问</h2></div><span>{useModel ? '大模型优先' : '规则版回答'}</span></div><label className="model-switch"><input type="checkbox" checked={useModel} onChange={(event) => setUseModel(event.target.checked)}/><span>优先使用 OpenAI 大模型生成回答</span><small>未开通额度时自动使用规则版</small></label><div className="question-chips"><button onClick={() => submitQuestion('为什么这周 GMV 增长了，转化率却下降？')}>GMV 与转化</button><button onClick={() => submitQuestion('如何提高复购？')}>如何提高复购？</button><button onClick={() => submitQuestion('外卖评分需要处理吗？')}>外卖评分需要处理吗？</button></div><div className="question-form"><input value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') submitQuestion(); }} aria-label="输入经营问题" placeholder="例如：应该先做引流还是复购？"/><button disabled={isAnalyzing} onClick={() => submitQuestion()}>{isAnalyzing ? '分析中…' : '分析'}</button></div>{answer && <div className="answer-card"><span>✦ {answerSource || '分析结果'}</span><p>{answer}</p></div>}</section>}
-      </> : tab === '经营数据' ? <DataWorkspace metrics={metrics} dataSource={dataSource} dailyMetrics={dailyMetrics} dailySource={dailySource} products={products} reviews={reviews} reviewSource={reviewSource} /> : tab === 'AI 诊断' ? <DiagnosisWorkspace insights={diagnosisInsights} actionPlan={actionPlan} reviews={reviews} dailyMetrics={dailyMetrics} metrics={metrics} completedActions={completedActions} reviewNote={reviewNote} onToggleAction={toggleAction} onClearActions={clearActions} onSaveReviewNote={saveReviewNote} onClearReviewNote={clearReviewNote} /> : <ProductWorkspace products={products} productSource={productSource} productUploadMessage={productUploadMessage} onUpload={handleProductUpload} />}
+      </> : tab === '经营数据' ? <DataWorkspace metrics={metrics} dataSource={dataSource} dailyMetrics={dailyMetrics} analysisRange={analysisRange} onChangeRange={setAnalysisRange} /> : tab === 'AI 诊断' ? <DiagnosisWorkspace insights={diagnosisInsights} actionPlan={actionPlan} reviews={reviews} dailyMetrics={dailyMetrics} metrics={metrics} completedActions={completedActions} reviewNote={reviewNote} onToggleAction={toggleAction} onClearActions={clearActions} onSaveReviewNote={saveReviewNote} onClearReviewNote={clearReviewNote} /> : <ProductWorkspace products={products} productSource={productSource} productUploadMessage={productUploadMessage} onUpload={handleProductUpload} />}
     </section>
   </main>;
 }
 function Metric({ label, value, change, down = false }: { label: string; value: string; change: string; down?: boolean }) { return <article className="metric"><p>{label}</p><strong>{value}</strong><span className={down ? 'down' : ''}>{change}</span></article>; }
 
-function DataWorkspace({ metrics, dataSource, dailyMetrics, dailySource, products, reviews, reviewSource }: { metrics: typeof initialMetrics; dataSource: string; dailyMetrics: DailyRecord[]; dailySource: string; products: ProductRecord[]; reviews: ReviewRecord[]; reviewSource: string }) {
+function DataWorkspace({ metrics, dataSource, dailyMetrics, analysisRange, onChangeRange }: { metrics: typeof initialMetrics; dataSource: string; dailyMetrics: DailyRecord[]; analysisRange: AnalysisRange; onChangeRange: (range: AnalysisRange) => void }) {
   const fields = [
     { label: 'GMV', value: metrics.gmv, description: '本周成交金额，用于观察收入规模。' },
     { label: '支付转化率', value: metrics.conversionRate, description: '从访问到支付的效率，用于发现下单阻力。' },
     { label: '复购率', value: metrics.repeatPurchaseRate, description: '顾客再次购买比例，用于衡量留存质量。' },
     { label: '外卖好评率', value: metrics.deliveryRating, description: '配送体验反馈，用于守住口碑。' },
   ];
+  const weeklySource = dataSource.startsWith('已上传') ? '已上传' : '演示数据';
+  const rangeOptions: Array<{ days: AnalysisRange; label: string }> = [{ days: 7, label: '近 7 天' }, { days: 14, label: '近 14 天' }, { days: 28, label: '近 1 月' }, { days: 180, label: '近 6 个月' }, { days: 365, label: '近 1 年' }];
+  const selectedLabel = rangeOptions.find((option) => option.days === analysisRange)?.label || '近 7 天';
+  const selectedData = dailyMetrics.slice(-analysisRange);
   return <section className="workspace-page">
-    <section className="workspace-hero"><div><p className="eyebrow">数据接入</p><h2>当前数据快照已准备好</h2><p>先确保数据正确，再让 AI 基于同一份事实给出建议。</p></div><span className="status-pill">● 数据已就绪</span></section>
-    <section className="data-summary-grid"><article className="panel source-panel"><p className="eyebrow">经营周报</p><h2>{dataSource}</h2><p>核心指标用于决定本周经营优先级，并和按天、商品、评价数据交叉验证。</p><div className="source-status"><span>核心字段</span><strong>4 / 4 已完整</strong></div></article><article className="panel quality-panel"><p className="eyebrow">按天经营数据</p><h2>{dailySource}</h2><ul><li><span>✓</span> 已识别 {dailyMetrics.length} 天访客、浏览、加购、支付与 GMV</li><li><span>✓</span> 含优惠、退款、出餐等待和外卖评分</li><li><span>✓</span> 总览趋势图已从真实数值渲染</li></ul></article></section>
-    <section className="data-coverage"><article><strong>{dailyMetrics.length}</strong><span>天经营漏斗数据</span><small>访问 → 浏览 → 加购 → 支付 → GMV</small></article><article><strong>{products.length}</strong><span>个商品明细</span><small>销量、收入、毛利、复购、评分、缺货</small></article><article><strong>{reviews.length}</strong><span>条顾客评价</span><small>{reviewSource}</small></article></section>
-    <section className="panel sample-data-panel"><div className="panel-head"><div><p className="eyebrow">数据使用方式</p><h2>先直接体验，再按需替换数据</h2></div><span className="period">演示模式已就绪</span></div><p>当前已自动载入 28 天经营、8 个商品和 12 条评价，无需下载或上传即可体验完整诊断流程。</p><div className="simple-data-flow"><article><span>01</span><div><strong>使用演示数据</strong><p>直接浏览总览、AI 诊断和商品分析，理解系统如何定位问题。</p></div></article><article><span>02</span><div><strong>需要时再换自己的数据</strong><p>仅需上传经营周报（右上角）和商品明细（商品分析页），其余数据先由系统内置。</p></div></article></div></section>
-    <section className="panel daily-table-panel"><div className="panel-head"><div><p className="eyebrow">最近 7 天经营明细</p><h2>从收入变化追到经营环节</h2></div><span className="period">28 天样例数据</span></div><div className="daily-table"><div className="daily-table-row daily-table-head"><span>日期</span><span>访客</span><span>支付</span><span>GMV</span></div>{dailyMetrics.slice(-7).map((item) => <div className="daily-table-row" key={item.date}><span>{item.date.slice(5).replace('-', '/')}</span><span>{item.visitors}</span><span>{item.paidOrders}</span><strong>¥{item.gmv.toLocaleString('zh-CN')}</strong></div>)}</div></section>
-    <WeekComparison dailyMetrics={dailyMetrics} />
-    <section className="panel field-panel"><div className="panel-head"><div><p className="eyebrow">字段字典</p><h2>每个数字具体代表什么？</h2></div><span className="period">经营周报</span></div><div className="field-table"><div className="field-row field-head"><span>字段</span><span>当前值</span><span>业务意义</span></div>{fields.map((field) => <div className="field-row" key={field.label}><strong>{field.label}</strong><b>{field.value}</b><p>{field.description}</p></div>)}</div></section>
+    <section className="workspace-hero"><div><p className="eyebrow">当前经营数据</p><h2>数据已准备好，可以开始判断变化</h2><p>选择观察范围，再去 AI 诊断定位原因。</p></div><span className="status-pill">● 数据已更新</span></section>
+    <section className="data-status-bar" aria-label="数据状态"><span><b>本周数据</b>{weeklySource}</span><span><b>核心指标</b>4 / 4 完整</span><span><b>AI 诊断</b>可以开始</span></section>
+    <section className="range-control"><span>查看范围</span><div>{rangeOptions.map((option) => <button key={option.days} disabled={option.days > dailyMetrics.length} className={analysisRange === option.days ? 'active' : ''} title={option.days > dailyMetrics.length ? `当前仅有 ${dailyMetrics.length} 天历史数据` : undefined} onClick={() => onChangeRange(option.days)}>{option.label}</button>)}</div><small>当前已加载 {dailyMetrics.length} 天历史数据</small></section>
+    <WeekComparison dailyMetrics={dailyMetrics} periodDays={analysisRange} />
+    <section className="panel daily-table-panel"><div className="panel-head"><div><p className="eyebrow">{selectedLabel}经营明细</p><h2>从收入变化追到经营环节</h2></div><span className="period">按天数据</span></div><div className="daily-table"><div className="daily-table-row daily-table-head"><span>日期</span><span>访客</span><span>支付</span><span>GMV</span></div>{selectedData.map((item) => <div className="daily-table-row" key={item.date}><span>{item.date.slice(5).replace('-', '/')}</span><span>{item.visitors}</span><span>{item.paidOrders}</span><strong>¥{item.gmv.toLocaleString('zh-CN')}</strong></div>)}</div></section>
+    <details className="field-help"><summary><div><p className="eyebrow">需要时再看</p><strong>字段说明与上传帮助</strong></div><span>⌄</span></summary><div className="field-help-body"><p>经营周报上传需要 GMV、支付转化率、复购率、外卖好评率四项核心数据。</p><div className="field-table"><div className="field-row field-head"><span>字段</span><span>当前值</span><span>业务意义</span></div>{fields.map((field) => <div className="field-row" key={field.label}><strong>{field.label}</strong><b>{field.value}</b><p>{field.description}</p></div>)}</div></div></details>
   </section>;
 }
 
@@ -491,10 +496,12 @@ function DailyTrend({ dailyMetrics }: { dailyMetrics: DailyRecord[] }) {
   return <article className="panel trend"><div className="panel-head"><div><p className="eyebrow">GMV 趋势 · 按天数据</p><h2>{peak ? `${peak.date.slice(5).replace('-', '/')} 达到本周收入峰值` : '正在读取按天经营数据'}</h2></div><span className="period">最近 7 天 / 共 {dailyMetrics.length} 天</span></div>{recentDays.length > 0 ? <><div className="daily-bars">{recentDays.map((item) => <div className="daily-bar-item" key={item.date}><span>¥{(item.gmv / 1000).toFixed(1)}k</span><i style={{ height: `${Math.max(14, item.gmv / maxGmv * 100)}%` }} /><b>{item.date.slice(5).replace('-', '/')}</b></div>)}</div><div className="legend"><span><i className="dot purple"/>GMV（每日成交金额）</span><span>近 7 天 ¥{recentDays.reduce((sum, item) => sum + item.gmv, 0).toLocaleString('zh-CN')}</span></div></> : <p className="empty-data">暂无按天数据。</p>}</article>;
 }
 
-function WeekComparison({ dailyMetrics }: { dailyMetrics: DailyRecord[] }) {
-  const previousWeek = dailyMetrics.slice(-14, -7);
-  const currentWeek = dailyMetrics.slice(-7);
-  if (previousWeek.length < 7 || currentWeek.length < 7) return <section className="panel week-comparison empty-week-comparison"><p className="eyebrow">环比验证</p><h2>需要至少 14 天按天数据</h2><p>当前还不能生成最近 7 天与前 7 天的可靠对比。</p></section>;
+function WeekComparison({ dailyMetrics, periodDays }: { dailyMetrics: DailyRecord[]; periodDays: AnalysisRange }) {
+  const periodLabel = periodDays === 7 ? '近 7 天' : periodDays === 14 ? '近 14 天' : periodDays === 28 ? '近 1 月' : periodDays === 180 ? '近 6 个月' : '近 1 年';
+  const previousWeek = dailyMetrics.slice(-periodDays * 2, -periodDays);
+  const currentWeek = dailyMetrics.slice(-periodDays);
+  if (currentWeek.length < periodDays) return <section className="panel week-comparison empty-week-comparison"><p className="eyebrow">趋势对比</p><h2>{periodLabel}数据尚未准备好</h2><p>继续积累历史经营数据后，即可查看这个时间范围的分析。</p></section>;
+  if (previousWeek.length < periodDays) return <section className="panel week-comparison empty-week-comparison"><p className="eyebrow">趋势对比 · 按天数据</p><h2>{periodLabel}经营概览已准备好</h2><p>当前可查看 {periodLabel}明细；还需要再积累 {periodDays} 天历史数据，才能进行完整环比。</p></section>;
   const sum = (records: DailyRecord[], key: 'gmv' | 'visitors' | 'paidOrders') => records.reduce((total, item) => total + item[key], 0);
   const averageWait = (records: DailyRecord[]) => records.reduce((total, item) => total + item.avgWaitMinutes, 0) / records.length;
   const previousGmv = sum(previousWeek, 'gmv');
@@ -506,13 +513,13 @@ function WeekComparison({ dailyMetrics }: { dailyMetrics: DailyRecord[] }) {
   const gmvChange = (currentGmv - previousGmv) / previousGmv * 100;
   const paidOrdersChange = (sum(currentWeek, 'paidOrders') - sum(previousWeek, 'paidOrders')) / sum(previousWeek, 'paidOrders') * 100;
   const comparisonItems = [
-    { label: 'GMV', value: `¥${currentGmv.toLocaleString('zh-CN')}`, change: `${gmvChange >= 0 ? '↑' : '↓'} ${Math.abs(gmvChange).toFixed(1)}%`, good: gmvChange >= 0, note: `前 7 天 ¥${previousGmv.toLocaleString('zh-CN')}` },
-    { label: '支付转化率', value: `${currentConversion.toFixed(1)}%`, change: `${currentConversion - previousConversion >= 0 ? '↑' : '↓'} ${Math.abs(currentConversion - previousConversion).toFixed(1)} 个百分点`, good: currentConversion >= previousConversion, note: `前 7 天 ${previousConversion.toFixed(1)}%` },
-    { label: '支付订单', value: `${sum(currentWeek, 'paidOrders')} 单`, change: `${paidOrdersChange >= 0 ? '↑' : '↓'} ${Math.abs(paidOrdersChange).toFixed(1)}%`, good: paidOrdersChange >= 0, note: `前 7 天 ${sum(previousWeek, 'paidOrders')} 单` },
-    { label: '平均等待', value: `${currentWait.toFixed(1)} 分钟`, change: `${currentWait - previousWait <= 0 ? '↓' : '↑'} ${Math.abs(currentWait - previousWait).toFixed(1)} 分钟`, good: currentWait <= previousWait, note: `前 7 天 ${previousWait.toFixed(1)} 分钟` },
+    { label: 'GMV', value: `¥${currentGmv.toLocaleString('zh-CN')}`, change: `${gmvChange >= 0 ? '↑' : '↓'} ${Math.abs(gmvChange).toFixed(1)}%`, good: gmvChange >= 0, note: `上一周期 ¥${previousGmv.toLocaleString('zh-CN')}` },
+    { label: '支付转化率', value: `${currentConversion.toFixed(1)}%`, change: `${currentConversion - previousConversion >= 0 ? '↑' : '↓'} ${Math.abs(currentConversion - previousConversion).toFixed(1)} 个百分点`, good: currentConversion >= previousConversion, note: `上一周期 ${previousConversion.toFixed(1)}%` },
+    { label: '支付订单', value: `${sum(currentWeek, 'paidOrders')} 单`, change: `${paidOrdersChange >= 0 ? '↑' : '↓'} ${Math.abs(paidOrdersChange).toFixed(1)}%`, good: paidOrdersChange >= 0, note: `上一周期 ${sum(previousWeek, 'paidOrders')} 单` },
+    { label: '平均等待', value: `${currentWait.toFixed(1)} 分钟`, change: `${currentWait - previousWait <= 0 ? '↓' : '↑'} ${Math.abs(currentWait - previousWait).toFixed(1)} 分钟`, good: currentWait <= previousWait, note: `上一周期 ${previousWait.toFixed(1)} 分钟` },
   ];
-  const dateRange = `${currentWeek[0].date.slice(5).replace('-', '/')} — ${currentWeek[6].date.slice(5).replace('-', '/')}`;
-  return <section className="panel week-comparison"><div className="panel-head"><div><p className="eyebrow">环比验证 · 按天数据</p><h2>最近 7 天对比前 7 天</h2></div><span className="period">{dateRange}</span></div><p className="week-comparison-intro">用同一口径的日经营数据看变化，避免只凭单周汇总数字下结论。</p><div className="week-comparison-grid">{comparisonItems.map((item) => <article key={item.label}><span>{item.label}</span><strong>{item.value}</strong><b className={item.good ? 'positive' : 'negative'}>{item.change}</b><small>{item.note}</small></article>)}</div></section>;
+  const dateRange = `${currentWeek[0].date.slice(5).replace('-', '/')} — ${currentWeek[currentWeek.length - 1].date.slice(5).replace('-', '/')}`;
+  return <section className="panel week-comparison"><div className="panel-head"><div><p className="eyebrow">趋势对比 · 按天数据</p><h2>{periodLabel}对比上一周期</h2></div><span className="period">{dateRange}</span></div><p className="week-comparison-intro">用同一口径的日经营数据看变化，避免只凭单周汇总数字下结论。</p><div className="week-comparison-grid">{comparisonItems.map((item) => <article key={item.label}><span>{item.label}</span><strong>{item.value}</strong><b className={item.good ? 'positive' : 'negative'}>{item.change}</b><small>{item.note}</small></article>)}</div></section>;
 }
 
 function DailyAnomaly({ dailyMetrics }: { dailyMetrics: DailyRecord[] }) {
