@@ -22,11 +22,6 @@ const initialMetrics = {
   deliveryRating: '4.76',
 };
 
-const insights = [
-  { level: '增长机会', title: '“燕麦拿铁”有复购潜力', detail: '近 30 天复购率 31%，高出门店平均值 9 个百分点。', tone: 'good' },
-  { level: '需要验证', title: '外卖评分出现波动', detail: '周三晚高峰的低分评价集中在出餐等待时间。', tone: 'neutral' },
-];
-
 const requiredMetricFields = ['gmv', 'payment_conversion_rate', 'repeat_purchase_rate', 'delivery_rating'];
 const requiredProductFields = ['product_name', 'category', 'units_sold', 'revenue', 'gross_margin', 'repeat_purchase_rate', 'rating', 'out_of_stock_count'];
 
@@ -190,23 +185,6 @@ function getConversionInsight(conversionRate: number) {
   };
 }
 
-function getPeakHourInsight(waitMinutes: number, conversionRate: number) {
-  if (waitMinutes >= 8 && conversionRate < 0.08) {
-    return {
-      level: '重点关注',
-      title: '午高峰出餐可能拖慢转化',
-      detail: `最高峰等待 ${waitMinutes.toFixed(1)} 分钟、转化率 ${(conversionRate * 100).toFixed(1)}%。建议增加备料或推出更快出品的套餐。`,
-      tone: 'alert',
-    };
-  }
-  return {
-    level: '状态良好',
-    title: '午高峰出餐体验稳定',
-    detail: `最高峰等待 ${waitMinutes.toFixed(1)} 分钟，当前未发现等待时间与转化同时恶化的信号。`,
-    tone: 'good',
-  };
-}
-
 function getDailyTrendInsight(dailyMetrics: DailyRecord[]) {
   const recentWeek = dailyMetrics.slice(-7);
   if (recentWeek.length < 6) return { level: '数据不足', title: '正在等待按天经营数据', detail: '补充至少 6 天数据后，可以判断收入和转化是否出现背离。', tone: 'neutral' };
@@ -310,17 +288,17 @@ export default function Home() {
   const [productSource, setProductSource] = useState('正在读取 product_metrics.csv');
   const [productUploadMessage, setProductUploadMessage] = useState('');
   const [dailyMetrics, setDailyMetrics] = useState<DailyRecord[]>([]);
-  const [dailySource, setDailySource] = useState('正在读取 daily_metrics.csv');
   const [reviews, setReviews] = useState<ReviewRecord[]>([]);
-  const [reviewSource, setReviewSource] = useState('正在读取 reviews.csv');
   const [uploadMessage, setUploadMessage] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [peakHourInsight, setPeakHourInsight] = useState({ level: '分析中', title: '正在读取午高峰数据', detail: '稍后将根据等待时间与转化率完成诊断。', tone: 'neutral' });
   const conversionRate = Number(metrics.conversionRate.replace('%', '')) / 100;
   const repeatPurchaseRate = Number(metrics.repeatPurchaseRate.replace('%', '')) / 100;
   const deliveryRating = Number(metrics.deliveryRating);
   const actionPlan = buildActionPlan(conversionRate, repeatPurchaseRate, deliveryRating);
-  const diagnosisInsights = [getConversionInsight(conversionRate), getDailyTrendInsight(dailyMetrics), getReviewInsight(reviews)];
+  const hasSavedWeeklyUpload = dataSource.startsWith('已上传') || dataSource.startsWith('已从本机恢复');
+  const diagnosisInsights = hasSavedWeeklyUpload
+    ? [getConversionInsight(conversionRate), { level: '需要更多数据', title: '按天趋势等待补充', detail: '当前已上传经营汇总；如需定位具体日期和高峰问题，需要补充按天经营记录。', tone: 'neutral' }]
+    : [getConversionInsight(conversionRate), getDailyTrendInsight(dailyMetrics), getReviewInsight(reviews)];
   const pageTitle = tab === '总览'
     ? '我是子月，我正在用 AI 帮商家找到增长机会。'
     : tab === '经营数据'
@@ -334,7 +312,6 @@ export default function Home() {
     : tab === '商品分析'
       ? `商品分析 · ${productSource}`
       : `${tab} · 2026/08/18 — 08/24 · ${dataSource}`;
-  const hasSavedWeeklyUpload = dataSource.startsWith('已上传') || dataSource.startsWith('已从本机恢复');
   const hasSavedProductUpload = productSource.startsWith('已上传') || productSource.startsWith('已从本机恢复');
 
   function applyMetricRecord(record: MetricRecord, source: string) {
@@ -475,7 +452,7 @@ export default function Home() {
       if (saved) {
         const upload = JSON.parse(saved) as SavedWeeklyUpload;
         if (upload.fileName && upload.record) {
-          applyMetricRecord(upload.record, `已从本机恢复 ${upload.fileName}`);
+          window.setTimeout(() => applyMetricRecord(upload.record, `已从本机恢复 ${upload.fileName}`), 0);
           return;
         }
       }
@@ -493,11 +470,11 @@ export default function Home() {
   useEffect(() => {
     try {
       const saved = window.localStorage.getItem('merchantmind-action-progress');
-      if (saved) setCompletedActions(JSON.parse(saved) as string[]);
+      if (saved) window.setTimeout(() => setCompletedActions(JSON.parse(saved) as string[]), 0);
     } catch {
       window.localStorage.removeItem('merchantmind-action-progress');
     } finally {
-      setActionProgressReady(true);
+      window.setTimeout(() => setActionProgressReady(true), 0);
     }
   }, []);
 
@@ -508,11 +485,11 @@ export default function Home() {
   useEffect(() => {
     try {
       const saved = window.localStorage.getItem('merchantmind-review-note');
-      if (saved) setReviewNote(JSON.parse(saved) as ReviewNote);
+      if (saved) window.setTimeout(() => setReviewNote(JSON.parse(saved) as ReviewNote), 0);
     } catch {
       window.localStorage.removeItem('merchantmind-review-note');
     } finally {
-      setReviewNoteReady(true);
+      window.setTimeout(() => setReviewNoteReady(true), 0);
     }
   }, []);
 
@@ -523,15 +500,15 @@ export default function Home() {
   useEffect(() => {
     fetch('/data/reviews.csv')
       .then((response) => response.text())
-      .then((csv) => { setReviews(readReviews(csv)); setReviewSource('已读取 reviews.csv'); })
-      .catch(() => { setReviews([]); setReviewSource('暂时没有可读取的评价数据'); });
+      .then((csv) => { setReviews(readReviews(csv)); })
+      .catch(() => { setReviews([]); });
   }, []);
 
   useEffect(() => {
     fetch('/data/daily_metrics.csv')
       .then((response) => response.text())
-      .then((csv) => { setDailyMetrics(readDailyMetrics(csv)); setDailySource('已读取 daily_metrics.csv'); })
-      .catch(() => { setDailyMetrics([]); setDailySource('暂时没有可读取的按天数据'); });
+      .then((csv) => { setDailyMetrics(readDailyMetrics(csv)); })
+      .catch(() => { setDailyMetrics([]); });
   }, []);
 
   useEffect(() => {
@@ -540,8 +517,10 @@ export default function Home() {
       if (saved) {
         const upload = JSON.parse(saved) as SavedProductUpload;
         if (upload.fileName && Array.isArray(upload.records)) {
-          setProducts(upload.records);
-          setProductSource(`已从本机恢复 ${upload.fileName}`);
+          window.setTimeout(() => {
+            setProducts(upload.records);
+            setProductSource(`已从本机恢复 ${upload.fileName}`);
+          }, 0);
           return;
         }
       }
@@ -557,16 +536,6 @@ export default function Home() {
       .catch(() => { setProducts([]); setProductSource('暂时没有可读取的商品数据'); });
   }, []);
 
-  useEffect(() => {
-    fetch('/data/hourly_funnel.csv')
-      .then((response) => response.text())
-      .then((csv) => {
-        const [headers, ...valueRows] = parseCsvRows(csv);
-        const rows = toRecords(headers, valueRows);
-        const peakHour = rows.sort((a, b) => Number(b.visitors) - Number(a.visitors))[0];
-        setPeakHourInsight(getPeakHourInsight(Number(peakHour.avg_wait_minutes), Number(peakHour.payment_conversion_rate)));
-      });
-  }, []);
   return <main className="app-shell">
     <aside className="sidebar">
       <div className="brand"><span className="brand-mark">M</span><span>MerchantMind</span></div>
@@ -580,12 +549,12 @@ export default function Home() {
       {report && <section className="report"><strong>已根据当前数据生成 3 项优先动作</strong><p className="decision-basis">判断依据：{actionPlan.basis}</p><ol className="report-list">{actionPlan.actions.map((action) => <li key={action}>{action}</li>)}</ol></section>}
       <section className="metrics" aria-label="核心指标"><Metric label="GMV" value={metrics.gmv} change="↑ 12.4%" /><Metric label="支付转化率" value={metrics.conversionRate} change="↓ 1.6%" down/><Metric label="复购率" value={metrics.repeatPurchaseRate} change="↑ 3.1%"/><Metric label="外卖好评率" value={metrics.deliveryRating} change="↓ 0.08" down/></section>
       <section className="grid-section">
-        <DailyTrend dailyMetrics={dailyMetrics} />
+        <DailyTrend dailyMetrics={dailyMetrics} isCaseData={hasSavedWeeklyUpload} />
         <article className="panel diagnosis"><div className="panel-head"><div><p className="eyebrow">AI 经营诊断</p><h2>今天最值得处理的事</h2></div><span className="spark">✦</span></div>{diagnosisInsights.map((x) => <div className={`insight ${x.tone}`} key={x.title}><span>{x.level}</span><div><strong>{x.title}</strong><p>{x.detail}</p></div><button aria-label={`查看${x.title}`}>›</button></div>)}</article>
       </section>
       <section className="panel ask"><div><p className="eyebrow">问问你的 AI 运营助手</p><h2>“为什么这周 GMV 增长了，转化率却下降？”</h2></div><button onClick={() => setAskOpen(!askOpen)}>{askOpen ? '收起问答' : '开始分析'} <span>→</span></button></section>
       {askOpen && <section className="ask-workspace" aria-label="运营问答"><div className="ask-intro"><div><p className="eyebrow">数据问答</p><h2>基于当前上传的经营数据提问</h2></div><span>{useModel ? '大模型优先' : '规则版回答'}</span></div><label className="model-switch"><input type="checkbox" checked={useModel} onChange={(event) => setUseModel(event.target.checked)}/><span>优先使用 OpenAI 大模型生成回答</span><small>未开通额度时自动使用规则版</small></label><div className="question-chips"><button onClick={() => submitQuestion('为什么这周 GMV 增长了，转化率却下降？')}>GMV 与转化</button><button onClick={() => submitQuestion('如何提高复购？')}>如何提高复购？</button><button onClick={() => submitQuestion('外卖评分需要处理吗？')}>外卖评分需要处理吗？</button></div><div className="question-form"><input value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') submitQuestion(); }} aria-label="输入经营问题" placeholder="例如：应该先做引流还是复购？"/><button disabled={isAnalyzing} onClick={() => submitQuestion()}>{isAnalyzing ? '分析中…' : '分析'}</button></div>{answer && <div className="answer-card"><span>✦ {answerSource || '分析结果'}</span><p>{answer}</p></div>}</section>}
-      </> : tab === '经营数据' ? <DataWorkspace metrics={metrics} dataSource={dataSource} dailyMetrics={dailyMetrics} analysisRange={analysisRange} onChangeRange={setAnalysisRange} /> : tab === 'AI 诊断' ? <DiagnosisWorkspace actionPlan={actionPlan} reviews={reviews} dailyMetrics={dailyMetrics} metrics={metrics} completedActions={completedActions} reviewNote={reviewNote} onToggleAction={toggleAction} onClearActions={clearActions} onSaveReviewNote={saveReviewNote} onClearReviewNote={clearReviewNote} /> : <ProductWorkspace products={products} productSource={productSource} productUploadMessage={productUploadMessage} onUpload={handleProductUpload} onRestoreDemo={restoreDemoProducts} showRestoreDemo={hasSavedProductUpload} />}
+      </> : tab === '经营数据' ? <DataWorkspace metrics={metrics} dataSource={dataSource} dailyMetrics={dailyMetrics} analysisRange={analysisRange} onChangeRange={setAnalysisRange} /> : tab === 'AI 诊断' ? <DiagnosisWorkspace actionPlan={actionPlan} reviews={reviews} dailyMetrics={dailyMetrics} metrics={metrics} usesCaseEvidence={hasSavedWeeklyUpload} completedActions={completedActions} reviewNote={reviewNote} onToggleAction={toggleAction} onClearActions={clearActions} onSaveReviewNote={saveReviewNote} onClearReviewNote={clearReviewNote} /> : <ProductWorkspace products={products} productSource={productSource} productUploadMessage={productUploadMessage} onUpload={handleProductUpload} onRestoreDemo={restoreDemoProducts} showRestoreDemo={hasSavedProductUpload} />}
     </section>
   </main>;
 }
@@ -614,11 +583,11 @@ function DataWorkspace({ metrics, dataSource, dailyMetrics, analysisRange, onCha
   </section>;
 }
 
-function DailyTrend({ dailyMetrics }: { dailyMetrics: DailyRecord[] }) {
+function DailyTrend({ dailyMetrics, isCaseData = false }: { dailyMetrics: DailyRecord[]; isCaseData?: boolean }) {
   const recentDays = dailyMetrics.slice(-7);
   const peak = recentDays.reduce((current, item) => !current || item.gmv > current.gmv ? item : current, recentDays[0]);
   const maxGmv = Math.max(...recentDays.map((item) => item.gmv), 1);
-  return <article className="panel trend"><div className="panel-head"><div><p className="eyebrow">GMV 趋势 · 按天数据</p><h2>{peak ? `${peak.date.slice(5).replace('-', '/')} 达到本周收入峰值` : '正在读取按天经营数据'}</h2></div><span className="period">最近 7 天 / 共 {dailyMetrics.length} 天</span></div>{recentDays.length > 0 ? <><div className="daily-bars">{recentDays.map((item) => <div className="daily-bar-item" key={item.date}><span>¥{(item.gmv / 1000).toFixed(1)}k</span><i style={{ height: `${Math.max(14, item.gmv / maxGmv * 100)}%` }} /><b>{item.date.slice(5).replace('-', '/')}</b></div>)}</div><div className="legend"><span><i className="dot purple"/>GMV（每日成交金额）</span><span>近 7 天 ¥{recentDays.reduce((sum, item) => sum + item.gmv, 0).toLocaleString('zh-CN')}</span></div></> : <p className="empty-data">暂无按天数据。</p>}</article>;
+  return <article className="panel trend"><div className="panel-head"><div><p className="eyebrow">GMV 趋势 · 按天数据</p><h2>{peak ? `${peak.date.slice(5).replace('-', '/')} 达到本周收入峰值` : '正在读取按天经营数据'}</h2></div><span className="period">{isCaseData ? '项目案例按天数据' : `最近 7 天 / 共 ${dailyMetrics.length} 天`}</span></div>{recentDays.length > 0 ? <><div className="daily-bars">{recentDays.map((item) => <div className="daily-bar-item" key={item.date}><span>¥{(item.gmv / 1000).toFixed(1)}k</span><i style={{ height: `${Math.max(14, item.gmv / maxGmv * 100)}%` }} /><b>{item.date.slice(5).replace('-', '/')}</b></div>)}</div><div className="legend"><span><i className="dot purple"/>GMV（每日成交金额）</span><span>近 7 天 ¥{recentDays.reduce((sum, item) => sum + item.gmv, 0).toLocaleString('zh-CN')}</span></div></> : <p className="empty-data">暂无按天数据。</p>}</article>;
 }
 
 function WeekComparison({ dailyMetrics, periodDays }: { dailyMetrics: DailyRecord[]; periodDays: AnalysisRange }) {
@@ -659,7 +628,7 @@ function DailyAnomaly({ dailyMetrics }: { dailyMetrics: DailyRecord[] }) {
   return <section className="daily-anomaly"><div className="daily-anomaly-head"><div><p className="eyebrow">异常定位 · 按天数据</p><h2>{item.date.slice(5).replace('-', '/')} 值得优先复盘</h2></div><span>判断依据</span></div><div className="anomaly-evidence"><article><span>当天平均等待</span><strong>{item.avgWaitMinutes.toFixed(1)} 分钟</strong><p>较整体均值 {averageWait.toFixed(1)} 分钟 {waitGap >= 0 ? '高' : '低'} {Math.abs(waitGap).toFixed(1)} 分钟</p></article><article><span>当天支付转化</span><strong>{(conversion * 100).toFixed(1)}%</strong><p>较整体均值 {(averageConversion * 100).toFixed(1)}% {conversionGap >= 0 ? '高' : '低'} {Math.abs(conversionGap).toFixed(1)} 个百分点</p></article><article><span>建议排查</span><strong>{waitGap > 0 && conversionGap < 0 ? '等待与转化同步恶化' : '检查订单与出餐节奏'}</strong><p>回看当天午高峰备料、商品组合和低分评价原因。</p></article></div></section>;
 }
 
-function DiagnosisWorkspace({ actionPlan, reviews, dailyMetrics, metrics, completedActions, reviewNote, onToggleAction, onClearActions, onSaveReviewNote, onClearReviewNote }: { actionPlan: { title: string; basis: string; actions: string[] }; reviews: ReviewRecord[]; dailyMetrics: DailyRecord[]; metrics: typeof initialMetrics; completedActions: string[]; reviewNote: ReviewNote; onToggleAction: (action: string) => void; onClearActions: () => void; onSaveReviewNote: (outcome: string, note: string) => void; onClearReviewNote: () => void }) {
+function DiagnosisWorkspace({ actionPlan, reviews, dailyMetrics, metrics, usesCaseEvidence, completedActions, reviewNote, onToggleAction, onClearActions, onSaveReviewNote, onClearReviewNote }: { actionPlan: { title: string; basis: string; actions: string[] }; reviews: ReviewRecord[]; dailyMetrics: DailyRecord[]; metrics: typeof initialMetrics; usesCaseEvidence: boolean; completedActions: string[]; reviewNote: ReviewNote; onToggleAction: (action: string) => void; onClearActions: () => void; onSaveReviewNote: (outcome: string, note: string) => void; onClearReviewNote: () => void }) {
   const [showReviewSamples, setShowReviewSamples] = useState(false);
   const [draftOutcome, setDraftOutcome] = useState(reviewNote.outcome);
   const [draftNote, setDraftNote] = useState(reviewNote.note);
@@ -675,23 +644,29 @@ function DiagnosisWorkspace({ actionPlan, reviews, dailyMetrics, metrics, comple
   const peakWaitDay = [...dailyMetrics].sort((a, b) => b.avgWaitMinutes - a.avgWaitMinutes)[0];
   const primaryIsDelivery = actionPlan.title.includes('外卖');
   const primaryIsProductGrowth = actionPlan.title.includes('高价值商品');
+  const secondPriority = usesCaseEvidence
+    ? { priority: 'P2', title: '补充按天经营记录', detail: '当前上传的是 4 项经营汇总，无法判断具体哪一天、哪个高峰环节导致变化。', action: '记录每天的访客、支付订单、GMV 和平均等待时间，再定位异常日期。' }
+    : primaryIsDelivery
+      ? { priority: 'P2', title: '关注支付转化效率', detail: `当前支付转化率 ${metrics.conversionRate}，先持续观察高峰时段的商品选择和下单效率。`, action: '记录午高峰访客、支付订单和商品组合变化，判断转化是否稳定。' }
+      : { priority: 'P2', title: '复盘午高峰出餐节奏', detail: peakWaitDay ? `${peakWaitDay.date.slice(5).replace('-', '/')} 平均等待 ${peakWaitDay.avgWaitMinutes.toFixed(1)} 分钟，是当前最值得回看的日期。` : '等待按天经营数据加载完成后，再定位高峰异常。', action: '回看异常日期的备料、出餐和商品组合，记录可改进环节。' };
   const priorityQueue = [
     { priority: 'P1', title: actionPlan.title, detail: actionPlan.basis, action: actionPlan.actions[0] },
-    primaryIsDelivery
-      ? { priority: 'P2', title: '关注支付转化效率', detail: `当前支付转化率 ${metrics.conversionRate}，先持续观察高峰时段的商品选择和下单效率。`, action: '记录午高峰访客、支付订单和商品组合变化，判断转化是否稳定。' }
-      : { priority: 'P2', title: '复盘午高峰出餐节奏', detail: peakWaitDay ? `${peakWaitDay.date.slice(5).replace('-', '/')} 平均等待 ${peakWaitDay.avgWaitMinutes.toFixed(1)} 分钟，是当前最值得回看的日期。` : '等待按天经营数据加载完成后，再定位高峰异常。', action: '回看异常日期的备料、出餐和商品组合，记录可改进环节。' },
+    secondPriority,
     primaryIsProductGrowth
       ? { priority: 'P3', title: '建立新客复购跟踪', detail: `当前复购率 ${metrics.repeatPurchaseRate}，把新客与老客分组，才能验证优惠是否有效。`, action: '按新客和老客分别记录复购率，下周比较变化。' }
       : { priority: 'P3', title: '测试高复购商品组合', detail: '选择一个高复购商品做加购或套餐测试，作为低风险增长实验。', action: '测试一组加购组合，并记录客单价与复购变化。' },
   ];
   const completedPriorityCount = priorityQueue.filter((item) => completedActions.includes(item.action)).length;
   const continuousObservations = Number(metrics.deliveryRating) >= 4.7 ? [{ title: '外卖体验当前稳定', detail: `当前外卖好评率为 ${metrics.deliveryRating}，暂不进入本周待办；继续关注低分评价中的等待、漏品和包装问题。` }] : [];
-  useEffect(() => { setDraftOutcome(reviewNote.outcome); setDraftNote(reviewNote.note); }, [reviewNote]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => { setDraftOutcome(reviewNote.outcome); setDraftNote(reviewNote.note); }, 0);
+    return () => window.clearTimeout(timer);
+  }, [reviewNote]);
   return <section className="workspace-page">
-    <section className="workspace-hero"><div><p className="eyebrow">诊断中心</p><h2>先做最值得做的一件事</h2><p>先明确行动，再按需查看数据依据。</p></div><span className="status-pill">✦ 已生成优先级</span></section>
+    <section className="workspace-hero"><div><p className="eyebrow">诊断中心</p><h2>先做最值得做的一件事</h2><p>{usesCaseEvidence ? '优先级基于当前上传的经营汇总；缺少按天记录时，不会判断具体异常日期。' : '先明确行动，再按需查看数据依据。'}</p></div><span className="status-pill">✦ {usesCaseEvidence ? '汇总优先级' : '已生成优先级'}</span></section>
     <section className="priority-card"><span className="priority-index">P1</span><div><p className="eyebrow light">本周最高优先级</p><h2>{priorityQueue[0].title}</h2><p>{priorityQueue[0].detail}</p></div><div className="priority-action"><span>建议先做</span><strong>{priorityQueue[0].action}</strong></div></section>
     <section className="action-tracker"><div className="action-tracker-head"><div><p className="eyebrow">本周优先动作</p><h2>执行 {completedPriorityCount} / {priorityQueue.length}</h2></div><div className="action-tracker-tools"><span>按 P1 → P3 推进</span>{completedActions.length > 0 && <button onClick={onClearActions}>清空进度</button>}</div></div>{priorityQueue.map((item) => <article className={`${completedActions.includes(item.action) ? 'action-item completed' : 'action-item'} priority-${item.priority.toLowerCase()}`} key={item.action}><button aria-label={`标记${item.title}完成`} onClick={() => onToggleAction(item.action)}>{completedActions.includes(item.action) ? '✓' : item.priority}</button><div><strong>{item.title}</strong><p>{item.detail}</p><small className="priority-action-copy">动作：{item.action}</small></div><span>{completedActions.includes(item.action) ? '已完成' : item.priority === 'P1' ? '优先处理' : item.priority === 'P2' ? '本周跟进' : '持续试验'}</span></article>)}</section>
-    <details className="diagnosis-fold"><summary><div><p className="eyebrow">需要时查看</p><strong>判断依据</strong></div><span>异常日期与评价证据　⌄</span></summary><div className="diagnosis-fold-body"><DailyAnomaly dailyMetrics={dailyMetrics}/><section className="review-evidence"><article><span>低分评价</span><strong>{lowScoreReviews.length} 条</strong><p>评分 ≤ 3 的真实评价</p></article><article><span>最集中问题</span><strong>{topIssue?.tag || '暂无'}</strong><p>{topIssue?.count || 0} 条评价涉及该问题</p></article><article><span>等待相关</span><strong>{waitIssues} 条</strong><p>可和高峰时段、出餐数据交叉分析</p></article></section><section className="review-samples"><button className="review-toggle" onClick={() => setShowReviewSamples((visible) => !visible)}>{showReviewSamples ? '收起低分评价样本' : `查看 ${lowScoreReviews.length} 条低分评价样本`}<span>{showReviewSamples ? '⌃' : '⌄'}</span></button>{showReviewSamples && <div className="review-sample-list">{reviewSamples.length > 0 ? reviewSamples.map((review) => <article key={`${review.date}-${review.productName}-${review.comment}`}><div className="review-sample-meta"><span>{review.date}</span><span>{review.channel}</span><span>{review.productName}</span><strong>{review.rating} 分</strong></div><p><b>{review.issueTag}</b>{review.comment}</p></article>) : <p className="review-empty">当前数据中没有低分评价。</p>}</div>}</section></div></details>
+    <details className="diagnosis-fold"><summary><div><p className="eyebrow">需要时查看</p><strong>判断依据</strong></div><span>{usesCaseEvidence ? '等待补充按天记录' : '异常日期与评价证据'}　⌄</span></summary><div className="diagnosis-fold-body">{usesCaseEvidence ? <p className="data-source-note"><b>暂不使用项目案例证据：</b>你上传的经营汇总没有包含按天订单与评价记录，所以这里不会把案例中的异常日期或低分评价当作你的真实经营问题。</p> : <><DailyAnomaly dailyMetrics={dailyMetrics}/><section className="review-evidence"><article><span>低分评价</span><strong>{lowScoreReviews.length} 条</strong><p>评分 ≤ 3 的真实评价</p></article><article><span>最集中问题</span><strong>{topIssue?.tag || '暂无'}</strong><p>{topIssue?.count || 0} 条评价涉及该问题</p></article><article><span>等待相关</span><strong>{waitIssues} 条</strong><p>可和高峰时段、出餐数据交叉分析</p></article></section><section className="review-samples"><button className="review-toggle" onClick={() => setShowReviewSamples((visible) => !visible)}>{showReviewSamples ? '收起低分评价样本' : `查看 ${lowScoreReviews.length} 条低分评价样本`}<span>{showReviewSamples ? '⌃' : '⌄'}</span></button>{showReviewSamples && <div className="review-sample-list">{reviewSamples.length > 0 ? reviewSamples.map((review) => <article key={`${review.date}-${review.productName}-${review.comment}`}><div className="review-sample-meta"><span>{review.date}</span><span>{review.channel}</span><span>{review.productName}</span><strong>{review.rating} 分</strong></div><p><b>{review.issueTag}</b>{review.comment}</p></article>) : <p className="review-empty">当前数据中没有低分评价。</p>}</div>}</section></>}</div></details>
     <details className="diagnosis-fold"><summary><div><p className="eyebrow">执行之后再看</p><strong>7 天后复盘</strong></div><span>{reviewNote.savedAt ? `已保存 · ${reviewNote.savedAt}` : '设置验证目标'}　⌄</span></summary><div className="diagnosis-fold-body"><section className="review-checkpoint"><p className="review-checkpoint-intro">当前数值是本周基线；下次上传周报后，按下面目标判断行动是否值得保留。</p><div className="checkpoint-table"><div className="checkpoint-row checkpoint-head"><span>指标</span><span>本周基线</span><span>下周验证目标</span><span>对应动作</span></div>{checkpoints.map((checkpoint) => <div className="checkpoint-row" key={checkpoint.label}><strong>{checkpoint.label}</strong><b>{checkpoint.baseline}</b><em>{checkpoint.target}</em><p>{checkpoint.meaning}</p></div>)}</div><div className="review-note-form"><label><span>本轮判断</span><select value={draftOutcome} onChange={(event) => setDraftOutcome(event.target.value)}><option>观察中</option><option>已验证有效</option><option>需要调整</option></select></label><label><span>复盘备注</span><textarea value={draftNote} onChange={(event) => setDraftNote(event.target.value)} placeholder="例如：午高峰套餐已测试 5 天，转化有所改善；下周继续观察。" /></label><div className="review-note-actions"><button onClick={() => onSaveReviewNote(draftOutcome, draftNote)}>保存本机复盘</button>{reviewNote.savedAt && <button className="clear-review" onClick={onClearReviewNote}>清空</button>}</div></div></section></div></details>
     {continuousObservations.length > 0 && <details className="diagnosis-fold"><summary><div><p className="eyebrow">暂不进入待办</p><strong>持续观察（{continuousObservations.length}）</strong></div><span>查看稳定信号　⌄</span></summary><div className="diagnosis-fold-body"><section className="observation-list">{continuousObservations.map((observation) => <article key={observation.title}><span>持续观察</span><div><strong>{observation.title}</strong><p>{observation.detail}</p></div></article>)}</section></div></details>}
   </section>;
