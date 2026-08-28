@@ -51,12 +51,52 @@ type SavedProductUpload = { records: ProductRecord[]; fileName: string };
 const weeklyUploadStorageKey = 'merchantmind-weekly-upload';
 const productUploadStorageKey = 'merchantmind-product-upload';
 
-function readWeeklyMetrics(csv: string): MetricRecord {
-  const lines = csv.trim().split(/\r?\n/).filter(Boolean);
-  if (lines.length < 2) throw new Error('文件中需要包含表头和至少一行数据');
+function parseCsvRows(csv: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = '';
+  let inQuotes = false;
+  const source = csv.replace(/^\uFEFF/, '');
 
-  const headers = lines[0].split(',').map((item) => item.trim());
-  const values = lines[1].split(',').map((item) => item.trim());
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    if (character === '"') {
+      if (inQuotes && source[index + 1] === '"') {
+        cell += '"';
+        index += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (character === ',' && !inQuotes) {
+      row.push(cell.trim());
+      cell = '';
+    } else if ((character === '\n' || character === '\r') && !inQuotes) {
+      if (character === '\r' && source[index + 1] === '\n') index += 1;
+      row.push(cell.trim());
+      if (row.some(Boolean)) rows.push(row);
+      row = [];
+      cell = '';
+    } else {
+      cell += character;
+    }
+  }
+
+  if (inQuotes) throw new Error('CSV 中有未闭合的英文双引号');
+  row.push(cell.trim());
+  if (row.some(Boolean)) rows.push(row);
+  return rows;
+}
+
+function toRecords(headers: string[], rows: string[][]): MetricRecord[] {
+  return rows.map((values) => Object.fromEntries(headers.map((header, index) => [header, values[index] ?? ''])));
+}
+
+function readWeeklyMetrics(csv: string): MetricRecord {
+  const rows = parseCsvRows(csv);
+  if (rows.length < 2) throw new Error('文件中需要包含表头和至少一行数据');
+
+  const headers = rows[0];
+  const values = rows[1];
   const record = Object.fromEntries(headers.map((header, index) => [header, values[index] ?? '']));
   const missing = requiredMetricFields.filter((field) => !record[field]);
 
@@ -68,12 +108,12 @@ function readWeeklyMetrics(csv: string): MetricRecord {
 }
 
 function readProductMetrics(csv: string): ProductRecord[] {
-  const lines = csv.trim().split(/\r?\n/).filter(Boolean);
-  if (lines.length < 2) throw new Error('文件中需要包含表头和至少一条商品数据');
-  const headers = lines[0].split(',').map((item) => item.trim());
+  const csvRows = parseCsvRows(csv);
+  if (csvRows.length < 2) throw new Error('文件中需要包含表头和至少一条商品数据');
+  const headers = csvRows[0];
   const missing = requiredProductFields.filter((field) => !headers.includes(field));
   if (missing.length) throw new Error('缺少必填字段：' + missing.join('、'));
-  const rows = lines.slice(1).map((line) => Object.fromEntries(headers.map((header, index) => [header, line.split(',')[index]?.trim() ?? ''])));
+  const rows = toRecords(headers, csvRows.slice(1));
   const records = rows.map((row) => ({
     productName: row.product_name,
     category: row.category,
@@ -91,14 +131,13 @@ function readProductMetrics(csv: string): ProductRecord[] {
 }
 
 function readDailyMetrics(csv: string): DailyRecord[] {
-  const lines = csv.trim().split(/\r?\n/).filter(Boolean);
-  if (lines.length < 2) throw new Error('文件中需要包含表头和至少一天数据');
-  const headers = lines[0].split(',').map((item) => item.trim());
+  const csvRows = parseCsvRows(csv);
+  if (csvRows.length < 2) throw new Error('文件中需要包含表头和至少一天数据');
+  const headers = csvRows[0];
   const required = ['date', 'visitors', 'orders', 'paid_orders', 'gmv'];
   const missing = required.filter((field) => !headers.includes(field));
   if (missing.length) throw new Error('缺少必填字段：' + missing.join('、'));
-  const records = lines.slice(1).map((line) => {
-    const row = Object.fromEntries(headers.map((header, index) => [header, line.split(',')[index]?.trim() ?? '']));
+  const records = toRecords(headers, csvRows.slice(1)).map((row) => {
     return { date: row.date, visitors: Number(row.visitors), orders: Number(row.orders), paidOrders: Number(row.paid_orders), gmv: Number(row.gmv), avgWaitMinutes: Number(row.avg_wait_minutes), deliveryRating: Number(row.delivery_rating) };
   });
   if (records.some((record) => !record.date || Object.values(record).some((value) => typeof value === 'number' && Number.isNaN(value)))) throw new Error('请检查日期及数值字段');
@@ -106,12 +145,11 @@ function readDailyMetrics(csv: string): DailyRecord[] {
 }
 
 function readReviews(csv: string): ReviewRecord[] {
-  const lines = csv.trim().split(/\r?\n/).filter(Boolean);
-  const headers = lines[0].split(',').map((item) => item.trim());
+  const csvRows = parseCsvRows(csv);
+  const headers = csvRows[0] || [];
   const required = ['date', 'channel', 'product_name', 'rating', 'issue_tag', 'comment'];
   if (required.some((field) => !headers.includes(field))) throw new Error('评价数据缺少必要字段');
-  return lines.slice(1).map((line) => {
-    const row = Object.fromEntries(headers.map((header, index) => [header, line.split(',')[index]?.trim() ?? '']));
+  return toRecords(headers, csvRows.slice(1)).map((row) => {
     return { date: row.date, channel: row.channel, productName: row.product_name, rating: Number(row.rating), issueTag: row.issue_tag, comment: row.comment };
   }).filter((review) => review.date && review.productName && !Number.isNaN(review.rating));
 }
@@ -504,9 +542,8 @@ export default function Home() {
     fetch('/data/hourly_funnel.csv')
       .then((response) => response.text())
       .then((csv) => {
-        const [headerLine, ...valueLines] = csv.trim().split('\n');
-        const headers = headerLine.split(',');
-        const rows = valueLines.map((line) => Object.fromEntries(headers.map((header, index) => [header, line.split(',')[index]])));
+        const [headers, ...valueRows] = parseCsvRows(csv);
+        const rows = toRecords(headers, valueRows);
         const peakHour = rows.sort((a, b) => Number(b.visitors) - Number(a.visitors))[0];
         setPeakHourInsight(getPeakHourInsight(Number(peakHour.avg_wait_minutes), Number(peakHour.payment_conversion_rate)));
       });
