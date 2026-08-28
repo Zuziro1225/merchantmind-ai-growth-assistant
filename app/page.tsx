@@ -42,9 +42,11 @@ type ReviewRecord = { date: string; channel: string; productName: string; rating
 type ReviewNote = { outcome: string; note: string; savedAt: string };
 type AnalysisRange = 7 | 14 | 28 | 180 | 365;
 type SavedWeeklyUpload = { record: MetricRecord; fileName: string };
+type SavedDailyUpload = { records: DailyRecord[]; fileName: string };
 type SavedProductUpload = { records: ProductRecord[]; fileName: string };
 
 const weeklyUploadStorageKey = 'merchantmind-weekly-upload';
+const dailyUploadStorageKey = 'merchantmind-daily-upload';
 const productUploadStorageKey = 'merchantmind-product-upload';
 
 function parseCsvRows(csv: string): string[][] {
@@ -152,10 +154,22 @@ function readDailyMetrics(csv: string): DailyRecord[] {
   const required = ['date', 'visitors', 'orders', 'paid_orders', 'gmv'];
   const missing = required.filter((field) => !headers.includes(field));
   if (missing.length) throw new Error('缺少必填字段：' + missing.join('、'));
-  const records = toRecords(headers, csvRows.slice(1)).map((row) => {
-    return { date: row.date, visitors: Number(row.visitors), orders: Number(row.orders), paidOrders: Number(row.paid_orders), gmv: Number(row.gmv), avgWaitMinutes: Number(row.avg_wait_minutes), deliveryRating: Number(row.delivery_rating) };
-  });
-  if (records.some((record) => !record.date || Object.values(record).some((value) => typeof value === 'number' && Number.isNaN(value)))) throw new Error('请检查日期及数值字段');
+  const records = toRecords(headers, csvRows.slice(1)).map((row, index) => {
+    const rowLabel = `第 ${index + 2} 行`;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(row.date)) throw new Error(`${rowLabel}日期请使用 YYYY-MM-DD 格式`);
+    const deliveryRating = Number(row.delivery_rating);
+    if (Number.isNaN(deliveryRating) || deliveryRating < 0 || deliveryRating > 5) throw new Error(`${rowLabel}外卖好评率请填写 0 到 5 的数字`);
+    return {
+      date: row.date,
+      visitors: readNonNegativeNumber(row.visitors, `${rowLabel}访客`),
+      orders: readNonNegativeNumber(row.orders, `${rowLabel}下单订单`),
+      paidOrders: readNonNegativeNumber(row.paid_orders, `${rowLabel}支付订单`),
+      gmv: readNonNegativeNumber(row.gmv, `${rowLabel}GMV`),
+      avgWaitMinutes: readNonNegativeNumber(row.avg_wait_minutes, `${rowLabel}平均等待`),
+      deliveryRating,
+    };
+  }).sort((a, b) => a.date.localeCompare(b.date));
+  if (new Set(records.map((record) => record.date)).size !== records.length) throw new Error('按天数据中存在重复日期，请保留每个日期的一条汇总记录');
   return records;
 }
 
@@ -288,6 +302,8 @@ export default function Home() {
   const [productSource, setProductSource] = useState('正在读取 product_metrics.csv');
   const [productUploadMessage, setProductUploadMessage] = useState('');
   const [dailyMetrics, setDailyMetrics] = useState<DailyRecord[]>([]);
+  const [dailySource, setDailySource] = useState('正在读取 daily_metrics.csv');
+  const [dailyUploadMessage, setDailyUploadMessage] = useState('');
   const [reviews, setReviews] = useState<ReviewRecord[]>([]);
   const [uploadMessage, setUploadMessage] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -296,8 +312,9 @@ export default function Home() {
   const deliveryRating = Number(metrics.deliveryRating);
   const actionPlan = buildActionPlan(conversionRate, repeatPurchaseRate, deliveryRating);
   const hasSavedWeeklyUpload = dataSource.startsWith('已上传') || dataSource.startsWith('已从本机恢复');
+  const hasSavedDailyUpload = dailySource.startsWith('已上传') || dailySource.startsWith('已从本机恢复');
   const diagnosisInsights = hasSavedWeeklyUpload
-    ? [getConversionInsight(conversionRate), { level: '需要更多数据', title: '按天趋势等待补充', detail: '当前已上传经营汇总；如需定位具体日期和高峰问题，需要补充按天经营记录。', tone: 'neutral' }]
+    ? [getConversionInsight(conversionRate), hasSavedDailyUpload ? getDailyTrendInsight(dailyMetrics) : { level: '需要更多数据', title: '按天趋势等待补充', detail: '当前已上传经营汇总；如需定位具体日期和高峰问题，需要补充按天经营记录。', tone: 'neutral' }]
     : [getConversionInsight(conversionRate), getDailyTrendInsight(dailyMetrics), getReviewInsight(reviews)];
   const pageTitle = tab === '总览'
     ? '我是子月，我正在用 AI 帮商家找到增长机会。'
@@ -311,7 +328,7 @@ export default function Home() {
     ? `经营数据 · ${rangeLabel} · 已加载 ${dailyMetrics.length} 天历史数据`
     : tab === '商品分析'
       ? `商品分析 · ${productSource}`
-      : `${tab} · 2026/08/18 — 08/24 · ${dataSource}`;
+    : `${tab} · 2026/08/18 — 08/24 · ${dataSource}`;
   const hasSavedProductUpload = productSource.startsWith('已上传') || productSource.startsWith('已从本机恢复');
 
   function applyMetricRecord(record: MetricRecord, source: string) {
@@ -388,6 +405,31 @@ export default function Home() {
     event.target.value = '';
   }
 
+  function handleDailyUpload(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith('.csv')) {
+      setDailyUploadMessage('请选择 CSV 格式的按天经营数据文件');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const records = readDailyMetrics(String(reader.result));
+        setDailyMetrics(records);
+        setDailySource(`已上传 ${file.name}`);
+        window.localStorage.setItem(dailyUploadStorageKey, JSON.stringify({ records, fileName: file.name } satisfies SavedDailyUpload));
+        setCompletedActions([]);
+        clearReviewNote();
+        setDailyUploadMessage(`上传成功：已读取 ${records.length} 天记录，趋势、对比和异常定位已刷新`);
+      } catch (error) {
+        setDailyUploadMessage(error instanceof Error ? `上传失败：${error.message}` : '上传失败，请检查文件格式');
+      }
+    };
+    reader.readAsText(file, 'utf-8');
+    event.target.value = '';
+  }
+
   function restoreDemoMetrics() {
     window.localStorage.removeItem(weeklyUploadStorageKey);
     fetch('/data/weekly_metrics.csv')
@@ -411,6 +453,20 @@ export default function Home() {
         setProductUploadMessage('已恢复演示商品明细');
       })
       .catch(() => setProductUploadMessage('恢复失败：演示商品明细暂时不可用'));
+  }
+
+  function restoreDemoDaily() {
+    window.localStorage.removeItem(dailyUploadStorageKey);
+    fetch('/data/daily_metrics.csv')
+      .then((response) => response.text())
+      .then((csv) => {
+        setDailyMetrics(readDailyMetrics(csv));
+        setDailySource('已恢复 daily_metrics.csv');
+        setCompletedActions([]);
+        clearReviewNote();
+        setDailyUploadMessage('已恢复演示按天经营数据');
+      })
+      .catch(() => setDailyUploadMessage('恢复失败：演示按天经营数据暂时不可用'));
   }
 
   async function submitQuestion(nextQuestion = question) {
@@ -505,10 +561,28 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(dailyUploadStorageKey);
+      if (saved) {
+        const upload = JSON.parse(saved) as SavedDailyUpload;
+        if (upload.fileName && Array.isArray(upload.records)) {
+          window.setTimeout(() => {
+            setDailyMetrics(upload.records);
+            setDailySource(`已从本机恢复 ${upload.fileName}`);
+          }, 0);
+          return;
+        }
+      }
+    } catch {
+      window.localStorage.removeItem(dailyUploadStorageKey);
+    }
     fetch('/data/daily_metrics.csv')
       .then((response) => response.text())
-      .then((csv) => { setDailyMetrics(readDailyMetrics(csv)); })
-      .catch(() => { setDailyMetrics([]); });
+      .then((csv) => {
+        setDailyMetrics(readDailyMetrics(csv));
+        setDailySource('已读取 daily_metrics.csv');
+      })
+      .catch(() => { setDailyMetrics([]); setDailySource('暂时没有可读取的按天数据'); });
   }, []);
 
   useEffect(() => {
@@ -548,18 +622,19 @@ export default function Home() {
       {tab === '总览' ? <><section className="hero-card"><div><p className="eyebrow light">当前经营健康度</p><div className="score-row"><strong>82</strong><span>/ 100</span><b>↑ 6 分</b></div></div><div className="hero-action"><span>✦ AI 给出的下一步</span><strong>{actionPlan.title}</strong><button onClick={() => setTab('AI 诊断')}>查看完整诊断 →</button></div></section>
       <section className="metrics" aria-label="核心指标"><Metric label="GMV" value={metrics.gmv} change="↑ 12.4%" /><Metric label="支付转化率" value={metrics.conversionRate} change="↓ 1.6%" down/><Metric label="复购率" value={metrics.repeatPurchaseRate} change="↑ 3.1%"/><Metric label="外卖好评率" value={metrics.deliveryRating} change="↓ 0.08" down/></section>
       <section className="grid-section">
-        <DailyTrend dailyMetrics={dailyMetrics} analysisRange={analysisRange} onChangeRange={setAnalysisRange} onOpenData={() => setTab('经营数据')} isCaseData={hasSavedWeeklyUpload} />
+        <DailyTrend dailyMetrics={dailyMetrics} analysisRange={analysisRange} onChangeRange={setAnalysisRange} onOpenData={() => setTab('经营数据')} isCaseData={!hasSavedDailyUpload} />
         <article className="panel diagnosis"><div className="panel-head"><div><p className="eyebrow">经营提醒</p><h2>当前值得留意的信号</h2></div><span className="spark">✦</span></div>{diagnosisInsights.slice(0, 2).map((x, index) => { const target = index === 0 ? 'AI 诊断' : '经营数据'; return <div className={`insight ${x.tone}`} key={x.title}><span>{x.level}</span><div><strong>{x.title}</strong><p>{x.detail}</p></div><button onClick={() => setTab(target)} aria-label={`${target === 'AI 诊断' ? '查看完整诊断' : '查看经营数据'}：${x.title}`}>{target === 'AI 诊断' ? '去诊断' : '看数据'} →</button></div>; })}</article>
       </section>
       <section className="panel ask"><div><p className="eyebrow">问问你的 AI 运营助手</p><h2>“为什么这周 GMV 增长了，转化率却下降？”</h2></div><button onClick={() => setAskOpen(!askOpen)}>{askOpen ? '收起问答' : '开始分析'} <span>→</span></button></section>
       {askOpen && <section className="ask-workspace" aria-label="运营问答"><div className="ask-intro"><div><p className="eyebrow">数据问答</p><h2>基于当前上传的经营数据提问</h2></div><span>{useModel ? '大模型优先' : '规则版回答'}</span></div><label className="model-switch"><input type="checkbox" checked={useModel} onChange={(event) => setUseModel(event.target.checked)}/><span>优先使用 OpenAI 大模型生成回答</span><small>未开通额度时自动使用规则版</small></label><div className="question-chips"><button onClick={() => submitQuestion('为什么这周 GMV 增长了，转化率却下降？')}>GMV 与转化</button><button onClick={() => submitQuestion('如何提高复购？')}>如何提高复购？</button><button onClick={() => submitQuestion('外卖评分需要处理吗？')}>外卖评分需要处理吗？</button></div><div className="question-form"><input value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') submitQuestion(); }} aria-label="输入经营问题" placeholder="例如：应该先做引流还是复购？"/><button disabled={isAnalyzing} onClick={() => submitQuestion()}>{isAnalyzing ? '分析中…' : '分析'}</button></div>{answer && <div className="answer-card"><span>✦ {answerSource || '分析结果'}</span><p>{answer}</p></div>}</section>}
-      </> : tab === '经营数据' ? <DataWorkspace metrics={metrics} dataSource={dataSource} dailyMetrics={dailyMetrics} analysisRange={analysisRange} onChangeRange={setAnalysisRange} /> : tab === 'AI 诊断' ? <DiagnosisWorkspace actionPlan={actionPlan} reviews={reviews} dailyMetrics={dailyMetrics} metrics={metrics} usesCaseEvidence={hasSavedWeeklyUpload} completedActions={completedActions} reviewNote={reviewNote} onToggleAction={toggleAction} onClearActions={clearActions} onSaveReviewNote={saveReviewNote} onClearReviewNote={clearReviewNote} /> : <ProductWorkspace products={products} productSource={productSource} productUploadMessage={productUploadMessage} onUpload={handleProductUpload} onRestoreDemo={restoreDemoProducts} showRestoreDemo={hasSavedProductUpload} />}
+      </> : tab === '经营数据' ? <DataWorkspace metrics={metrics} dataSource={dataSource} dailyMetrics={dailyMetrics} dailySource={dailySource} dailyUploadMessage={dailyUploadMessage} showRestoreDemo={hasSavedDailyUpload} analysisRange={analysisRange} onChangeRange={setAnalysisRange} onUploadDaily={handleDailyUpload} onRestoreDemoDaily={restoreDemoDaily} /> : tab === 'AI 诊断' ? <DiagnosisWorkspace actionPlan={actionPlan} reviews={reviews} dailyMetrics={dailyMetrics} metrics={metrics} usesCaseEvidence={!hasSavedDailyUpload} completedActions={completedActions} reviewNote={reviewNote} onToggleAction={toggleAction} onClearActions={clearActions} onSaveReviewNote={saveReviewNote} onClearReviewNote={clearReviewNote} /> : <ProductWorkspace products={products} productSource={productSource} productUploadMessage={productUploadMessage} onUpload={handleProductUpload} onRestoreDemo={restoreDemoProducts} showRestoreDemo={hasSavedProductUpload} />}
     </section>
   </main>;
 }
 function Metric({ label, value, change, down = false }: { label: string; value: string; change: string; down?: boolean }) { return <article className="metric"><p>{label}</p><strong>{value}</strong><span className={down ? 'down' : ''}>{change}</span></article>; }
 
-function DataWorkspace({ metrics, dataSource, dailyMetrics, analysisRange, onChangeRange }: { metrics: typeof initialMetrics; dataSource: string; dailyMetrics: DailyRecord[]; analysisRange: AnalysisRange; onChangeRange: (range: AnalysisRange) => void }) {
+function DataWorkspace({ metrics, dataSource, dailyMetrics, dailySource, dailyUploadMessage, showRestoreDemo, analysisRange, onChangeRange, onUploadDaily, onRestoreDemoDaily }: { metrics: typeof initialMetrics; dataSource: string; dailyMetrics: DailyRecord[]; dailySource: string; dailyUploadMessage: string; showRestoreDemo: boolean; analysisRange: AnalysisRange; onChangeRange: (range: AnalysisRange) => void; onUploadDaily: (event: ChangeEvent<HTMLInputElement>) => void; onRestoreDemoDaily: () => void }) {
+  const dailyInputRef = useRef<HTMLInputElement>(null);
   const fields = [
     { label: 'GMV', value: metrics.gmv, description: '本周成交金额，用于观察收入规模。' },
     { label: '支付转化率', value: metrics.conversionRate, description: '从访问到支付的效率，用于发现下单阻力。' },
@@ -568,17 +643,19 @@ function DataWorkspace({ metrics, dataSource, dailyMetrics, analysisRange, onCha
   ];
   const isUploadedWeekly = dataSource.startsWith('已上传') || dataSource.startsWith('已从本机恢复');
   const weeklySource = isUploadedWeekly ? '已上传并保存在本机' : '演示数据';
+  const isUploadedDaily = dailySource.startsWith('已上传') || dailySource.startsWith('已从本机恢复');
+  const dailyStatus = isUploadedDaily ? '已上传并保存在本机' : '演示数据';
   const rangeOptions: Array<{ days: AnalysisRange; label: string }> = [{ days: 7, label: '近 7 天' }, { days: 14, label: '近 14 天' }, { days: 28, label: '近 1 月' }, { days: 180, label: '近 6 个月' }, { days: 365, label: '近 1 年' }];
   const selectedLabel = rangeOptions.find((option) => option.days === analysisRange)?.label || '近 7 天';
   const selectedData = dailyMetrics.slice(-analysisRange);
   return <section className="workspace-page">
-    <section className="workspace-hero"><h2>经营数据</h2><span className="status-pill">● 数据已更新</span></section>
-    <section className="data-status-bar" aria-label="数据状态"><span><b>经营汇总</b>{weeklySource}</span><span><b>核心指标</b>4 / 4 完整</span><span><b>AI 诊断</b>可以开始</span></section>
-    {isUploadedWeekly && <p className="data-source-note"><b>数据来源：</b>经营汇总（已上传） · 按天趋势（项目案例）</p>}
+    <section className="workspace-hero data-workspace-hero"><h2>经营数据</h2><div className="data-header-actions"><input ref={dailyInputRef} className="file-input" type="file" accept=".csv,text/csv" onChange={onUploadDaily}/><button onClick={() => dailyInputRef.current?.click()}>＋ 上传按天数据</button>{showRestoreDemo && <button className="data-restore-demo" onClick={onRestoreDemoDaily}>恢复演示数据</button>}<a href="/data/daily_metrics.csv" download="按天经营数据案例.csv">下载案例</a><span className="status-pill">● 数据已更新</span></div></section>
+    {dailyUploadMessage && <p className={`product-upload-message top-message ${dailyUploadMessage.startsWith('上传成功') || dailyUploadMessage.startsWith('已恢复') ? 'success' : 'error'}`}>{dailyUploadMessage}</p>}
+    <section className="data-status-bar" aria-label="数据状态"><span><b>经营汇总</b>{weeklySource}</span><span><b>按天记录</b>{dailyStatus}</span><span><b>AI 诊断</b>可以开始</span></section>
     <section className="range-control"><span>查看范围</span><div>{rangeOptions.map((option) => <button key={option.days} disabled={option.days > dailyMetrics.length} className={analysisRange === option.days ? 'active' : ''} title={option.days > dailyMetrics.length ? `当前仅有 ${dailyMetrics.length} 天历史数据` : undefined} onClick={() => onChangeRange(option.days)}>{option.label}</button>)}</div><small>当前已加载 {dailyMetrics.length} 天历史数据</small></section>
     <WeekComparison dailyMetrics={dailyMetrics} periodDays={analysisRange} />
     <section className="panel daily-table-panel"><div className="panel-head"><div><p className="eyebrow">{selectedLabel}经营明细</p><h2>从收入变化追到经营环节</h2></div><span className="period">按天数据</span></div><div className="daily-table"><div className="daily-table-row daily-table-head"><span>日期</span><span>访客</span><span>支付</span><span>GMV</span></div>{selectedData.map((item) => <div className="daily-table-row" key={item.date}><span>{item.date.slice(5).replace('-', '/')}</span><span>{item.visitors}</span><span>{item.paidOrders}</span><strong>¥{item.gmv.toLocaleString('zh-CN')}</strong></div>)}</div></section>
-    <details className="field-help"><summary><div><p className="eyebrow">需要时再看</p><strong>字段说明与上传帮助</strong></div><span>⌄</span></summary><div className="field-help-body"><p>经营周报上传需要 GMV、支付转化率、复购率、外卖好评率四项核心数据。</p><div className="field-table"><div className="field-row field-head"><span>字段</span><span>当前值</span><span>业务意义</span></div>{fields.map((field) => <div className="field-row" key={field.label}><strong>{field.label}</strong><b>{field.value}</b><p>{field.description}</p></div>)}</div></div></details>
+    <details className="field-help"><summary><div><p className="eyebrow">需要时再看</p><strong>字段说明与上传帮助</strong></div><span>⌄</span></summary><div className="field-help-body"><p>顶部“上传经营数据”用于经营汇总：GMV、支付转化率、复购率、外卖好评率。此处“上传按天数据”用于趋势与异常定位：日期、访客、下单订单、支付订单、GMV、平均等待、外卖好评率。</p><div className="field-table"><div className="field-row field-head"><span>字段</span><span>当前值</span><span>业务意义</span></div>{fields.map((field) => <div className="field-row" key={field.label}><strong>{field.label}</strong><b>{field.value}</b><p>{field.description}</p></div>)}</div></div></details>
   </section>;
 }
 
