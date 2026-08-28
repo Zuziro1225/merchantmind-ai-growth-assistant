@@ -598,13 +598,15 @@ function DataWorkspace({ metrics, dataSource, dailyMetrics, analysisRange, onCha
     { label: '复购率', value: metrics.repeatPurchaseRate, description: '顾客再次购买比例，用于衡量留存质量。' },
     { label: '外卖好评率', value: metrics.deliveryRating, description: '配送体验反馈，用于守住口碑。' },
   ];
-  const weeklySource = dataSource.startsWith('已上传') ? '已上传' : '演示数据';
+  const isUploadedWeekly = dataSource.startsWith('已上传') || dataSource.startsWith('已从本机恢复');
+  const weeklySource = isUploadedWeekly ? '已上传并保存在本机' : '演示数据';
   const rangeOptions: Array<{ days: AnalysisRange; label: string }> = [{ days: 7, label: '近 7 天' }, { days: 14, label: '近 14 天' }, { days: 28, label: '近 1 月' }, { days: 180, label: '近 6 个月' }, { days: 365, label: '近 1 年' }];
   const selectedLabel = rangeOptions.find((option) => option.days === analysisRange)?.label || '近 7 天';
   const selectedData = dailyMetrics.slice(-analysisRange);
   return <section className="workspace-page">
     <section className="workspace-hero"><div><p className="eyebrow">当前经营数据</p><h2>数据已准备好，可以开始判断变化</h2><p>选择观察范围，再去 AI 诊断定位原因。</p></div><span className="status-pill">● 数据已更新</span></section>
-    <section className="data-status-bar" aria-label="数据状态"><span><b>本周数据</b>{weeklySource}</span><span><b>核心指标</b>4 / 4 完整</span><span><b>AI 诊断</b>可以开始</span></section>
+    <section className="data-status-bar" aria-label="数据状态"><span><b>经营汇总</b>{weeklySource}</span><span><b>核心指标</b>4 / 4 完整</span><span><b>AI 诊断</b>可以开始</span></section>
+    {isUploadedWeekly && <p className="data-source-note"><b>数据范围说明：</b>本次上传的 4 项经营汇总已用于总览和行动优先级；下方按天趋势仍是项目案例数据，仅用于体验多周期分析，不会与已上传汇总混合计算。</p>}
     <section className="range-control"><span>查看范围</span><div>{rangeOptions.map((option) => <button key={option.days} disabled={option.days > dailyMetrics.length} className={analysisRange === option.days ? 'active' : ''} title={option.days > dailyMetrics.length ? `当前仅有 ${dailyMetrics.length} 天历史数据` : undefined} onClick={() => onChangeRange(option.days)}>{option.label}</button>)}</div><small>当前已加载 {dailyMetrics.length} 天历史数据</small></section>
     <WeekComparison dailyMetrics={dailyMetrics} periodDays={analysisRange} />
     <section className="panel daily-table-panel"><div className="panel-head"><div><p className="eyebrow">{selectedLabel}经营明细</p><h2>从收入变化追到经营环节</h2></div><span className="period">按天数据</span></div><div className="daily-table"><div className="daily-table-row daily-table-head"><span>日期</span><span>访客</span><span>支付</span><span>GMV</span></div>{selectedData.map((item) => <div className="daily-table-row" key={item.date}><span>{item.date.slice(5).replace('-', '/')}</span><span>{item.visitors}</span><span>{item.paidOrders}</span><strong>¥{item.gmv.toLocaleString('zh-CN')}</strong></div>)}</div></section>
