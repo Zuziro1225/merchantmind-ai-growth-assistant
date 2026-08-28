@@ -91,6 +91,22 @@ function toRecords(headers: string[], rows: string[][]): MetricRecord[] {
   return rows.map((values) => Object.fromEntries(headers.map((header, index) => [header, values[index] ?? ''])));
 }
 
+function readRate(value: string, fieldName: string): number {
+  const raw = value.trim();
+  const usesPercentSign = raw.endsWith('%');
+  const number = Number(usesPercentSign ? raw.slice(0, -1).trim() : raw);
+  if (Number.isNaN(number) || number < 0 || (usesPercentSign && number > 100) || (!usesPercentSign && number > 1)) {
+    throw new Error(`${fieldName}请填写 0 到 1 的小数，或带 % 的百分比`);
+  }
+  return usesPercentSign ? number / 100 : number;
+}
+
+function readNonNegativeNumber(value: string, fieldName: string): number {
+  const number = Number(value);
+  if (Number.isNaN(number) || number < 0) throw new Error(`${fieldName}需要填写大于或等于 0 的数字`);
+  return number;
+}
+
 function readWeeklyMetrics(csv: string): MetricRecord {
   const rows = parseCsvRows(csv);
   if (rows.length < 2) throw new Error('文件中需要包含表头和至少一行数据');
@@ -101,10 +117,10 @@ function readWeeklyMetrics(csv: string): MetricRecord {
   const missing = requiredMetricFields.filter((field) => !record[field]);
 
   if (missing.length) throw new Error('缺少必填字段：' + missing.join('、'));
-  if (requiredMetricFields.some((field) => Number.isNaN(Number(record[field])))) {
-    throw new Error('4 个核心指标必须是数字');
-  }
-  return record;
+  const gmv = readNonNegativeNumber(record.gmv, 'GMV');
+  const deliveryRating = Number(record.delivery_rating);
+  if (Number.isNaN(deliveryRating) || deliveryRating < 0 || deliveryRating > 5) throw new Error('外卖好评率请填写 0 到 5 的数字');
+  return { ...record, gmv: String(gmv), payment_conversion_rate: String(readRate(record.payment_conversion_rate, '支付转化率')), repeat_purchase_rate: String(readRate(record.repeat_purchase_rate, '复购率')), delivery_rating: String(deliveryRating) };
 }
 
 function readProductMetrics(csv: string): ProductRecord[] {
@@ -114,19 +130,22 @@ function readProductMetrics(csv: string): ProductRecord[] {
   const missing = requiredProductFields.filter((field) => !headers.includes(field));
   if (missing.length) throw new Error('缺少必填字段：' + missing.join('、'));
   const rows = toRecords(headers, csvRows.slice(1));
-  const records = rows.map((row) => ({
-    productName: row.product_name,
-    category: row.category,
-    unitsSold: Number(row.units_sold),
-    revenue: Number(row.revenue),
-    grossMargin: Number(row.gross_margin),
-    repeatPurchaseRate: Number(row.repeat_purchase_rate),
-    rating: Number(row.rating),
-    outOfStockCount: Number(row.out_of_stock_count),
-  }));
-  if (records.some((record) => !record.productName || !record.category || Object.values(record).some((value) => typeof value === 'number' && Number.isNaN(value)))) {
-    throw new Error('请检查商品名称、品类及所有数值字段');
-  }
+  const records = rows.map((row, index) => {
+    const rowLabel = `第 ${index + 2} 行`;
+    if (!row.product_name || !row.category) throw new Error(`${rowLabel}缺少商品名称或品类`);
+    const rating = Number(row.rating);
+    if (Number.isNaN(rating) || rating < 0 || rating > 5) throw new Error(`${rowLabel}评分请填写 0 到 5 的数字`);
+    return {
+      productName: row.product_name,
+      category: row.category,
+      unitsSold: readNonNegativeNumber(row.units_sold, `${rowLabel}销量`),
+      revenue: readNonNegativeNumber(row.revenue, `${rowLabel}收入`),
+      grossMargin: readRate(row.gross_margin, `${rowLabel}毛利率`),
+      repeatPurchaseRate: readRate(row.repeat_purchase_rate, `${rowLabel}复购率`),
+      rating,
+      outOfStockCount: readNonNegativeNumber(row.out_of_stock_count, `${rowLabel}缺货次数`),
+    };
+  });
   return records;
 }
 
