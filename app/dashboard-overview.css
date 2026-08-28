@@ -1,0 +1,7 @@
+.daily-bars{overflow:visible}
+.daily-bar-item{border:0;padding:0;background:transparent;font:inherit;cursor:pointer}
+.daily-bar-item:focus-visible{outline:0}
+.trend-selection{display:flex;flex-wrap:wrap;align-items:center;gap:7px 12px;margin-top:12px;padding:9px 10px;border:1px solid #e7e1f8;border-radius:9px;color:#706a7a;background:#faf9ff;font-size:10px;line-height:1.35}
+.trend-selection>span:first-child{color:#5d5484}.trend-selection b,.trend-selection strong{color:#40366d}.trend-selection strong{font-size:12px}.trend-selection small{margin-left:auto;color:#9791a3;font-size:9px}
+.diagnosis .insight{padding:12px 0}.diagnosis .insight:last-child{padding-bottom:4px}
+@media(max-width:620px){.trend-selection{gap:6px 9px}.trend-selection small{width:100%;margin-left:0}.trend-selection strong{width:100%}}
