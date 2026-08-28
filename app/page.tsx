@@ -745,6 +745,35 @@ function DiagnosisWorkspace({ actionPlan, reviews, dailyMetrics, metrics, usesCa
   ];
   const completedPriorityCount = priorityQueue.filter((item) => completedActions.includes(item.action)).length;
   const continuousObservations = Number(metrics.deliveryRating) >= 4.7 ? [{ title: '外卖体验当前稳定', detail: `当前外卖好评率为 ${metrics.deliveryRating}，暂不进入本周待办；继续关注低分评价中的等待、漏品和包装问题。` }] : [];
+  function exportActionPlan() {
+    const today = new Date().toLocaleDateString('zh-CN').replaceAll('/', '-');
+    const plan = [
+      '# MerchantMind｜经营行动方案',
+      `生成日期：${today}`,
+      '',
+      '## 当前经营数据',
+      `- GMV：${metrics.gmv}`,
+      `- 支付转化率：${metrics.conversionRate}`,
+      `- 复购率：${metrics.repeatPurchaseRate}`,
+      `- 外卖好评率：${metrics.deliveryRating}`,
+      '',
+      '## 本周优先动作',
+      ...priorityQueue.map((item) => `- ${item.priority}｜${item.title}\n  - 判断：${item.detail}\n  - 动作：${item.action}`),
+      '',
+      '## 7 天后复盘',
+      ...checkpoints.map((item) => `- ${item.label}：当前 ${item.baseline}，目标 ${item.target}`),
+      reviewNote.note ? `\n## 本机复盘备注\n- 结论：${reviewNote.outcome}\n- 备注：${reviewNote.note}` : '',
+    ].join('\n');
+    const file = new Blob([plan], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(file);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `MerchantMind-经营行动方案-${today}.md`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
   useEffect(() => {
     const timer = window.setTimeout(() => { setDraftOutcome(reviewNote.outcome); setDraftNote(reviewNote.note); }, 0);
     return () => window.clearTimeout(timer);
@@ -752,7 +781,7 @@ function DiagnosisWorkspace({ actionPlan, reviews, dailyMetrics, metrics, usesCa
   return <section className="workspace-page">
     <section className="workspace-hero"><div><p className="eyebrow">诊断中心</p><h2>本周优先动作</h2></div><span className="status-pill">✦ {usesCaseEvidence ? '汇总优先级' : '已生成优先级'}</span></section>
     <section className="priority-card"><span className="priority-index">P1</span><div><p className="eyebrow light">本周最高优先级</p><h2>{priorityQueue[0].title}</h2><p>{priorityQueue[0].detail}</p></div><div className="priority-action"><span>建议先做</span><strong>{priorityQueue[0].action}</strong></div></section>
-    <section className="action-tracker"><div className="action-tracker-head"><div><p className="eyebrow">本周优先动作</p><h2>执行 {completedPriorityCount} / {priorityQueue.length}</h2></div><div className="action-tracker-tools"><span>按 P1 → P3 推进</span>{completedActions.length > 0 && <button onClick={onClearActions}>清空进度</button>}</div></div>{priorityQueue.map((item) => <article className={`${completedActions.includes(item.action) ? 'action-item completed' : 'action-item'} priority-${item.priority.toLowerCase()}`} key={item.action}><button aria-label={`标记${item.title}完成`} onClick={() => onToggleAction(item.action)}>{completedActions.includes(item.action) ? '✓' : item.priority}</button><div><strong>{item.title}</strong><p>{item.detail}</p><small className="priority-action-copy">动作：{item.action}</small></div><span>{completedActions.includes(item.action) ? '已完成' : item.priority === 'P1' ? '优先处理' : item.priority === 'P2' ? '本周跟进' : '持续试验'}</span></article>)}</section>
+    <section className="action-tracker"><div className="action-tracker-head"><div><p className="eyebrow">本周优先动作</p><h2>执行 {completedPriorityCount} / {priorityQueue.length}</h2></div><div className="action-tracker-tools"><span>按 P1 → P3 推进</span><button onClick={exportActionPlan}>导出行动方案</button>{completedActions.length > 0 && <button onClick={onClearActions}>清空进度</button>}</div></div>{priorityQueue.map((item) => <article className={`${completedActions.includes(item.action) ? 'action-item completed' : 'action-item'} priority-${item.priority.toLowerCase()}`} key={item.action}><button aria-label={`标记${item.title}完成`} onClick={() => onToggleAction(item.action)}>{completedActions.includes(item.action) ? '✓' : item.priority}</button><div><strong>{item.title}</strong><p>{item.detail}</p><small className="priority-action-copy">动作：{item.action}</small></div><span>{completedActions.includes(item.action) ? '已完成' : item.priority === 'P1' ? '优先处理' : item.priority === 'P2' ? '本周跟进' : '持续试验'}</span></article>)}</section>
     <details className="diagnosis-fold"><summary><div><p className="eyebrow">需要时查看</p><strong>判断依据</strong></div><span>{usesCaseEvidence ? '等待补充按天记录' : '异常日期与评价证据'}　⌄</span></summary><div className="diagnosis-fold-body">{usesCaseEvidence ? <p className="data-source-note"><b>当前数据：</b>经营汇总已上传；按天与评价记录未上传。</p> : <><DailyAnomaly dailyMetrics={dailyMetrics}/><section className="review-evidence"><article><span>低分评价</span><strong>{lowScoreReviews.length} 条</strong><p>评分 ≤ 3 的真实评价</p></article><article><span>最集中问题</span><strong>{topIssue?.tag || '暂无'}</strong><p>{topIssue?.count || 0} 条评价涉及该问题</p></article><article><span>等待相关</span><strong>{waitIssues} 条</strong><p>可和高峰时段、出餐数据交叉分析</p></article></section><section className="review-samples"><button className="review-toggle" onClick={() => setShowReviewSamples((visible) => !visible)}>{showReviewSamples ? '收起低分评价样本' : `查看 ${lowScoreReviews.length} 条低分评价样本`}<span>{showReviewSamples ? '⌃' : '⌄'}</span></button>{showReviewSamples && <div className="review-sample-list">{reviewSamples.length > 0 ? reviewSamples.map((review) => <article key={`${review.date}-${review.productName}-${review.comment}`}><div className="review-sample-meta"><span>{review.date}</span><span>{review.channel}</span><span>{review.productName}</span><strong>{review.rating} 分</strong></div><p><b>{review.issueTag}</b>{review.comment}</p></article>) : <p className="review-empty">当前数据中没有低分评价。</p>}</div>}</section></>}</div></details>
     <details className="diagnosis-fold"><summary><div><p className="eyebrow">执行之后再看</p><strong>7 天后复盘</strong></div><span>{reviewNote.savedAt ? `已保存 · ${reviewNote.savedAt}` : '设置验证目标'}　⌄</span></summary><div className="diagnosis-fold-body"><section className="review-checkpoint"><p className="review-checkpoint-intro">当前数值是本周基线；下次上传周报后，按下面目标判断行动是否值得保留。</p><div className="checkpoint-table"><div className="checkpoint-row checkpoint-head"><span>指标</span><span>本周基线</span><span>下周验证目标</span><span>对应动作</span></div>{checkpoints.map((checkpoint) => <div className="checkpoint-row" key={checkpoint.label}><strong>{checkpoint.label}</strong><b>{checkpoint.baseline}</b><em>{checkpoint.target}</em><p>{checkpoint.meaning}</p></div>)}</div><div className="review-note-form"><label><span>本轮判断</span><select value={draftOutcome} onChange={(event) => setDraftOutcome(event.target.value)}><option>观察中</option><option>已验证有效</option><option>需要调整</option></select></label><label><span>复盘备注</span><textarea value={draftNote} onChange={(event) => setDraftNote(event.target.value)} placeholder="例如：午高峰套餐已测试 5 天，转化有所改善；下周继续观察。" /></label><div className="review-note-actions"><button onClick={() => onSaveReviewNote(draftOutcome, draftNote)}>保存本机复盘</button>{reviewNote.savedAt && <button className="clear-review" onClick={onClearReviewNote}>清空</button>}</div></div></section></div></details>
     {continuousObservations.length > 0 && <details className="diagnosis-fold"><summary><div><p className="eyebrow">暂不进入待办</p><strong>持续观察（{continuousObservations.length}）</strong></div><span>查看稳定信号　⌄</span></summary><div className="diagnosis-fold-body"><section className="observation-list">{continuousObservations.map((observation) => <article key={observation.title}><span>持续观察</span><div><strong>{observation.title}</strong><p>{observation.detail}</p></div></article>)}</section></div></details>}
