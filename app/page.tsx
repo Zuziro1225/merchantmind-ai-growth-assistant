@@ -222,6 +222,15 @@ function getReviewInsight(reviews: ReviewRecord[]) {
   return { level: '需要处理', title: `低分评价集中在“${issue.tag}”`, detail: `${lowScore.length} 条低分评价中，有 ${issue.count} 条涉及${issue.tag}。建议将这类订单作为下周复盘的重点样本。`, tone: 'alert' };
 }
 
+function getHealthScore(conversionRate: number, repeatPurchaseRate: number, deliveryRating: number) {
+  const conversionScore = Math.min(conversionRate / 0.1, 1) * 45;
+  const repeatScore = Math.min(repeatPurchaseRate / 0.3, 1) * 30;
+  const ratingScore = Math.min(deliveryRating / 5, 1) * 25;
+  const score = Math.round(conversionScore + repeatScore + ratingScore);
+  const label = score >= 85 ? '状态良好' : score >= 70 ? '可以提升' : '优先调整';
+  return { score, label };
+}
+
 function buildActionPlan(conversionRate: number, repeatPurchaseRate: number, deliveryRating: number) {
   if (conversionRate < 0.08) {
     return {
@@ -311,6 +320,7 @@ export default function Home() {
   const repeatPurchaseRate = Number(metrics.repeatPurchaseRate.replace('%', '')) / 100;
   const deliveryRating = Number(metrics.deliveryRating);
   const actionPlan = buildActionPlan(conversionRate, repeatPurchaseRate, deliveryRating);
+  const health = getHealthScore(conversionRate, repeatPurchaseRate, deliveryRating);
   const hasSavedWeeklyUpload = dataSource.startsWith('已上传') || dataSource.startsWith('已从本机恢复');
   const hasSavedDailyUpload = dailySource.startsWith('已上传') || dailySource.startsWith('已从本机恢复');
   const diagnosisInsights = hasSavedWeeklyUpload
@@ -619,7 +629,7 @@ export default function Home() {
     </aside>
     <section className="content">
       <header className="topbar"><div><p className="eyebrow">{topbarContext}</p><h1>{pageTitle}</h1>{uploadMessage && <p className={`upload-message ${uploadMessage.startsWith('上传成功') || uploadMessage.startsWith('已恢复') ? 'success' : 'error'}`}>{uploadMessage}</p>}</div><div><input ref={fileInputRef} className="file-input" type="file" accept=".csv,text/csv" onChange={handleUpload}/><button className="upload" onClick={() => fileInputRef.current?.click()}>＋ 上传经营数据</button>{hasSavedWeeklyUpload && <button className="restore-demo" onClick={restoreDemoMetrics}>恢复演示数据</button>}<p className="upload-hint">支持核心指标 CSV 上传 · <a href="/data/weekly_metrics.csv" download="经营周报案例.csv">下载案例</a></p></div></header>
-      {tab === '总览' ? <><section className="hero-card"><div><p className="eyebrow light">当前经营健康度</p><div className="score-row"><strong>82</strong><span>/ 100</span><b>↑ 6 分</b></div></div><div className="hero-action"><span>✦ AI 给出的下一步</span><strong>{actionPlan.title}</strong><button onClick={() => setTab('AI 诊断')}>查看完整诊断 →</button></div></section>
+      {tab === '总览' ? <><section className="hero-card"><div><p className="eyebrow light">当前经营健康度</p><div className="score-row"><strong>{health.score}</strong><span>/ 100</span><b>{health.label}</b></div></div><div className="hero-action"><span>✦ AI 给出的下一步</span><strong>{actionPlan.title}</strong><button onClick={() => setTab('AI 诊断')}>查看完整诊断 →</button></div></section>
       <section className="metrics" aria-label="核心指标"><Metric label="GMV" value={metrics.gmv} change="↑ 12.4%" /><Metric label="支付转化率" value={metrics.conversionRate} change="↓ 1.6%" down/><Metric label="复购率" value={metrics.repeatPurchaseRate} change="↑ 3.1%"/><Metric label="外卖好评率" value={metrics.deliveryRating} change="↓ 0.08" down/></section>
       <section className="grid-section">
         <DailyTrend dailyMetrics={dailyMetrics} analysisRange={analysisRange} onChangeRange={setAnalysisRange} onOpenData={() => setTab('经营数据')} isCaseData={!hasSavedDailyUpload} />
