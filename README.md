@@ -38,6 +38,7 @@
 - CSV 文件解析与客户端数据状态管理
 - OpenAI Responses API（服务端 API 路由）
 - 可解释的经营规则与容错降级策略
+- Open Graph / X 分享元信息与品牌预览图
 
 ## 关键设计取舍
 
