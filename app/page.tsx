@@ -1,6 +1,7 @@
 'use client';
 
 import { ChangeEvent, useEffect, useRef, useState } from 'react';
+import { getHealthScore, parseCsvRows, readNonNegativeNumber, readRate } from './business-rules';
 import './workspaces.css';
 import './upload.css';
 import './product-analysis.css';
@@ -51,60 +52,8 @@ const dailyUploadStorageKey = 'merchantmind-daily-upload';
 const reviewUploadStorageKey = 'merchantmind-review-upload';
 const productUploadStorageKey = 'merchantmind-product-upload';
 
-function parseCsvRows(csv: string): string[][] {
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let cell = '';
-  let inQuotes = false;
-  const source = csv.replace(/^\uFEFF/, '');
-
-  for (let index = 0; index < source.length; index += 1) {
-    const character = source[index];
-    if (character === '"') {
-      if (inQuotes && source[index + 1] === '"') {
-        cell += '"';
-        index += 1;
-      } else {
-        inQuotes = !inQuotes;
-      }
-    } else if (character === ',' && !inQuotes) {
-      row.push(cell.trim());
-      cell = '';
-    } else if ((character === '\n' || character === '\r') && !inQuotes) {
-      if (character === '\r' && source[index + 1] === '\n') index += 1;
-      row.push(cell.trim());
-      if (row.some(Boolean)) rows.push(row);
-      row = [];
-      cell = '';
-    } else {
-      cell += character;
-    }
-  }
-
-  if (inQuotes) throw new Error('CSV 中有未闭合的英文双引号');
-  row.push(cell.trim());
-  if (row.some(Boolean)) rows.push(row);
-  return rows;
-}
-
 function toRecords(headers: string[], rows: string[][]): MetricRecord[] {
   return rows.map((values) => Object.fromEntries(headers.map((header, index) => [header, values[index] ?? ''])));
-}
-
-function readRate(value: string, fieldName: string): number {
-  const raw = value.trim();
-  const usesPercentSign = raw.endsWith('%');
-  const number = Number(usesPercentSign ? raw.slice(0, -1).trim() : raw);
-  if (Number.isNaN(number) || number < 0 || (usesPercentSign && number > 100) || (!usesPercentSign && number > 1)) {
-    throw new Error(`${fieldName}请填写 0 到 1 的小数，或带 % 的百分比`);
-  }
-  return usesPercentSign ? number / 100 : number;
-}
-
-function readNonNegativeNumber(value: string, fieldName: string): number {
-  const number = Number(value);
-  if (Number.isNaN(number) || number < 0) throw new Error(`${fieldName}需要填写大于或等于 0 的数字`);
-  return number;
 }
 
 function readWeeklyMetrics(csv: string): MetricRecord {
@@ -222,15 +171,6 @@ function getReviewInsight(reviews: ReviewRecord[]) {
   const issue = ['等待过长', '漏品', '缺货', '包装漏液'].map((tag) => ({ tag, count: lowScore.filter((review) => review.issueTag === tag).length })).sort((a, b) => b.count - a.count)[0];
   if (!lowScore.length || !issue?.count) return { level: '状态良好', title: '评价反馈暂无集中风险', detail: '当前没有识别到需要优先处理的低分评价模式。', tone: 'good' };
   return { level: '需要处理', title: `低分评价集中在“${issue.tag}”`, detail: `${lowScore.length} 条低分评价中，有 ${issue.count} 条涉及${issue.tag}。建议将这类订单作为下周复盘的重点样本。`, tone: 'alert' };
-}
-
-function getHealthScore(conversionRate: number, repeatPurchaseRate: number, deliveryRating: number) {
-  const conversionScore = Math.min(conversionRate / 0.1, 1) * 45;
-  const repeatScore = Math.min(repeatPurchaseRate / 0.3, 1) * 30;
-  const ratingScore = Math.min(deliveryRating / 5, 1) * 25;
-  const score = Math.round(conversionScore + repeatScore + ratingScore);
-  const label = score >= 85 ? '状态良好' : score >= 70 ? '可以提升' : '优先调整';
-  return { score, label };
 }
 
 function buildActionPlan(conversionRate: number, repeatPurchaseRate: number, deliveryRating: number) {
